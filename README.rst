@@ -24,8 +24,10 @@ If you use this code or its models in your research, please cite:
 Documentation
 -------------
 
-TBD
+At the moment (11-21) the documentation is scattered throughout the code, and, of course, some of it is out of date.
+But, a good starting point for how to use it is in curate_using_lca.py.  More to come soon.
 
-Task list:
+Task list
+---------
 
 https://docs.google.com/document/d/1Ph9CggXPqkzHC-pBEABDTftJxBdBgJIUo8EEJoMzkbo/edit
