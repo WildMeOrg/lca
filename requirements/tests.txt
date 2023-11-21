@@ -1,7 +1,0 @@
-brunette
-codecov
-coverage
-pytest
-pytest-cov
-pytest-subprocess
-xdoctest
