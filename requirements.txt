@@ -1,3 +1,15 @@
--r requirements/build.txt
--r requirements/runtime.txt
--r requirements/tests.txt
+matplotlib
+networkx
+numpy
+scipy
+Sphinx
+sphinx-rtd-theme
+wbia-utool
+
+brunette
+codecov
+coverage
+pytest
+pytest-cov
+pytest-subprocess
+xdoctest
