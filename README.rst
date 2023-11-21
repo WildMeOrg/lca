@@ -23,3 +23,9 @@ If you use this code or its models in your research, please cite:
 
 Documentation
 -------------
+
+TBD
+
+Task list:
+
+https://docs.google.com/document/d/1Ph9CggXPqkzHC-pBEABDTftJxBdBgJIUo8EEJoMzkbo/edit
