@@ -1,31 +1,19 @@
 # -*- coding: utf-8 -*-
 """
 The interface to the database asks for properties like nodes, edges,
-clusters and cluster ids. These are deliberately abstracted from the
-design of Wildbook. Their current Wildbook analogs are annotations,
-edges, marked individuals and their UUIDs. Since this could change in
-the future and we also hope that the algorithm could be used for other
-applications, we keep the terms of interface abstract.
+clusters and cluster ids. 
 
 All edges are communicated as "quads" where each quad is of the form
   (n0, n1, w, aug_name)
 Here, n0 and n1 are the nodes, w is the (signed!) weight and aug_name
 is the augmentation method --- a verification algorithm or a human
-annotator -- that produced the edge.  Importantly, n0 < n1.
-
-X As currently written, nodes are not added to the database through this
-X interface. It is assumed that these are entered using a separate
-X interface that runs before the graph algorithm.
+annotator/reviewer -- that produced the edge.  Importantly, n0 < n1.
 
 Nodes are generally added implicitly through adding edges, but as a
 safety precaution all nodes in the clustering also added. This will
 only add nodes that are disconnected from others in graph; such nodes
 do not participate in the graph algorithm and are only recorded here
 to avoid errors.
-
-I suspect we can implement this as a class hierarchy where examples and
-simulation are handled through one subclass and the true database
-interface is handled through another.
 """
 import logging
 import networkx as nx
@@ -69,11 +57,11 @@ class db_interface(object):  # NOQA
     #     """
     #     return self.get_weight_db(triple)
 
-    def edges_from_attributes(self, n0, n1):
-        try:
-            return self.edges_from_attributes_db(n0, n1)
-        except KeyError:
-            return None
+    # def edges_from_attributes(self, n0, n1):
+    #     try:
+    #         return self.edges_from_attributes_db(n0, n1)
+    #     except KeyError:
+    #        return None
 
     def cluster_exists(self, cid):
         """
