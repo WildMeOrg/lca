@@ -14,6 +14,8 @@ class db_interface_generic(db_interface.db_interface):
     def __init__(self, db_file, clustering):
         self.db_file = db_file
 
+        # To do:  replace with use of pandas to make it more robust.
+
         with open(self.db_file, 'r') as f:
             lines = f.read().split('\n')
         lines = [line.strip().split() for line in lines]
@@ -60,6 +62,16 @@ class db_interface_generic(db_interface.db_interface):
     def commmit_cluster_change_db(self, cc):
         raise NotImplementedError()
     """
+
+AUG_NAME_HUMAN = 'human'
+
+
+def is_aug_name_algo(aug_name):
+    return aug_name != AUG_NAME_HUMAN
+
+
+def is_aug_name_human(aug_name):
+    return aug_name == AUG_NAME_HUMAN
 
 
 class edge_generator_generic(edge_generator.edge_generator):  # NOQA
@@ -121,9 +133,10 @@ class edge_generator_generic(edge_generator.edge_generator):  # NOQA
         }
 
         for n0, n1, _ in review_triples:
-            if (n0, n1) in requests_to_keep and \
-                requests_to_keep[(n0, n1)] == 'human':
-                del requests_to_keep[(n0, n1)]
+            pr = (n0, n1)
+            if pr in requests_to_keep and \
+                is_aug_name_human(requests_to_keep[pr]):
+                del requests_to_keep[pr]
 
         requests_to_keep = [
             (n0, n1, requests_to_keep[(n0, n1)])
@@ -134,20 +147,85 @@ class edge_generator_generic(edge_generator.edge_generator):  # NOQA
 
 
 """
+Given 
+(1) a list of verifier edge triples (n0, n1, score), where
+    n0 < n1 are nodes and score is the verifier score, 
+(2) a method to call to obtain human reviews on a list of 
+    (n0, n1) pairs
+(3), (4) target number positive and negative human decisions
+
+Return:
+(1) a list of positively-reviewed edge triples
+(2) a list of negatively-reviewed edge triples
+(3) a boolean signal from the human reviewer to quit LCA
+
+In its usual behavior the function will return enough
+positive and negative triples and will not return a quit 
+signal.  
 """
 def generate_wgtr_calibration_ground_truth(verifier_edges,
                                            human_reviewer,
                                            num_pos_needed,
                                            num_neg_needed)
 {
-    # Follow style in _plugin.py for sampling.
+    # Method: The range of scores is divided up into equally-sized
+    # bins and the verifier edges are assigned to the bins based
+    # on their score.  After shuffling each bins, edges are picked
+    # one by one from each bin and saved in a list until the bins
+    # are empty. Edges from the list are sent to the human_reviewer
+    # in small batches and the results are saved.
 
-    # Return both the human review triples and the dictionary of 
-    # scores for both positively and negatively reviewed pairs.
+    # 1. For the bins
+    num_bins = 10
+    scores = [s for _, _, s in verifier_edges]
+    min_score = min(scores)
+    max_score = max(scores)
+    delta_score = (max_score - min_score) / num_bins
+    bins = [[] for _ in range(num_bins)]
+    for n0, n1, s in verified_edges:
+        i = int((s - min_score) / delta_score)
+        bins[i].append((n0, n1, s))
 
-    sort(verifier_edges)
-}
+    # 2. Shuffle each bin
+    for i in range(num_bins):
+        random.shuffle(bins[i])
 
+    # 3. Pull edges from the bins
+    edge_nodes = []
+    edge_scores = {}
+    i = 0
+    while len(bins) > 0:
+        if len(bins[i]) == 0:
+            del bins[i]
+            if i == len(bins):
+                i = 0
+        else:
+            n0, n1, s = bins[i][-1]
+            edge_nodes.append((n0, n1))
+            edge_scores[(n0, n1)] = stability
+            del bins[i][-1]
+            i = (i + 1) % len(bins)
+
+    # 4. Send to the reviewer in small batches.
+    num_in_batch = max(4, (num_pos_need + num_neg_needed) // 2)
+    pos_triples = []
+    neg_triples = []
+    i = 0
+    while i < len(edge_nodes):
+        j = min(i + num_in_batch, len(edge_nodes))
+        reviews, quit_lca = human_reviewer(edge_nodes[i: j])
+        if quit_lca:
+            break
+        for n0, n1, b in reviews:
+            e = (n0, n1, edge_scores[(n0, n1)])
+            if b:
+                pos_triples.append(e)
+            else:
+                neg_triples.append(e)
+        if len(pos_triples) >= num_pos_needed and len(neg_triples) >= num_neg_needed:
+            break
+
+    return pos_triples, neg_triples, quit_lca
 
 
 """
