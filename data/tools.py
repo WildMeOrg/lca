@@ -38,6 +38,9 @@ def print_div():
     print('-'*50)
     print()
 
+def join_without_intersection(df, dfs, cols, left_on, right_on):
+    dfs = dfs[cols]
+    return (df.drop(dfs.columns, axis=1, errors="ignore")).merge(dfs, left_on=left_on, right_on=right_on, how='left')
 
 def final_join(df_tr, dfa, dfi, df):
     # Rename merged keys that originally changed names. These keys will be used for reference by MiewID
@@ -47,20 +50,24 @@ def final_join(df_tr, dfa, dfi, df):
     dfa_tr = dfa[dfa['uuid'].isin(dfa_uuids)]
     dfi_tr = dfi[dfi['uuid'].isin(dfi_uuids)]
 
-    merge_cols = ['uuid_x', 'name_viewpoint', 'species_viewpoint', 'species', 'uuid_y']
-    dfa_tr = dfa_tr.merge(df[merge_cols], left_on='uuid', right_on='uuid_x', how='left').drop('uuid_x', 1)
+    merge_cols = ['uuid_x', 'name_viewpoint', 'species_viewpoint', 'species', 'uuid_y', 'viewpoint']
+    # dfa_tr = dfa_tr.merge(df[merge_cols], left_on='uuid', right_on='uuid_x', how='left').drop('uuid_x', 1)
+    dfa_tr = join_without_intersection(dfa_tr, df, merge_cols, left_on='uuid', right_on='uuid_x').drop('uuid_x', 1)
     dfa_tr['image_uuid'] = dfa_tr['uuid_y']
 
     # merge_cols = ['uuid_y', 'file_path']
     # dfi_tr = dfi_tr.merge(df[merge_cols], left_on='uuid', right_on=merge_cols[0], how='left').drop(merge_cols[0], 1)
 
     merge_cols = ['uuid_x', 'bbox']
-    dfa_tr = dfa_tr.merge(df[merge_cols], left_on='uuid', right_on='uuid_x', how='left').drop('uuid_x', 1)
-    dfa_tr['bbox'] = dfa_tr['bbox_y']
-    dfa_tr = dfa_tr.drop('bbox_y', 1)
+    # dfa_tr = dfa_tr.merge(df[merge_cols], left_on='uuid', right_on='uuid_x', how='left').drop('uuid_x', 1)
+    # dfa_tr['bbox'] = dfa_tr['bbox_y']
+    # dfa_tr = dfa_tr.drop('bbox_y', 1)
+    dfa_tr = join_without_intersection(dfa_tr, df, merge_cols, left_on='uuid', right_on='uuid_x').drop('uuid_x', 1)
     return dfa_tr, dfi_tr
 
 def assign_viewpoint(viewpoint, excluded_viewpoints):
+    if viewpoint is None:
+        return None
     if viewpoint in excluded_viewpoints:
         return None
     if "left" in viewpoint:
@@ -77,18 +84,16 @@ def assign_viewpoints(df, excluded_viewpoints):
     # Filter out rows with NaN in the 'viewpoint' column
     df = df[~df['viewpoint'].isna()]
     return df
-    
 
-def filter_by_csv(df, csv_folder):
+def filter_by_csv(df, csv_folder, names=['annotation_uuid', 'species', 'viewpoint', 'name_uuid', 'name', 'date'], merge_cols=['annotation_uuid', 'date']):
     # Filter by csv. Can support multiple csv files, all in the same folder
 
     
     # Load CSV files
     dfs = []
     for file_path in glob.glob(f'{csv_folder}/*'):
-        _dfs = pd.read_csv(file_path, names=['annotation_uuid', 'species', 'viewpoint', 'name_uuid', 'name', 'date'])
+        _dfs = pd.read_csv(file_path, names=names)
         dfs.append(_dfs)
-    
     # Concatenate and drop duplicates based on 'annotation_uuid'
     dfs = pd.concat(dfs)
     dfs = dfs.drop_duplicates(subset=['annotation_uuid'])
@@ -100,6 +105,7 @@ def filter_by_csv(df, csv_folder):
     df = df.reset_index(drop=True)
 
     # Merge additional information from the concatenated DataFrame
-    df = df.merge(dfs[['annotation_uuid', 'date']], left_on='uuid_x', right_on='annotation_uuid', how='left')      
+    # df = df.merge(dfs[['annotation_uuid', 'date']], left_on='uuid_x', right_on='annotation_uuid', how='left')      
+    df = join_without_intersection(df, dfs, merge_cols, left_on='uuid_x', right_on='annotation_uuid')
 
     return df

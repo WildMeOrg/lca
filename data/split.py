@@ -59,7 +59,7 @@ def split_df(df, sgkf_n_splits=10, skf_n_splits=10, verbose=False, plot_dist=Tru
     if filter_min_max:
         print_div()
         print('Applying filter_min=True')
-        _dfa_train = filter_min_df(dfa_train, 2)
+        _dfa_train = filter_min_df(dfa_train, 4)
         _dfa_test = filter_min_df(subsample_max_df(dfa_test, 100), 2)
         _dfa_val = filter_min_df(subsample_max_df(dfa_val, 100), 2)
     else:
@@ -69,8 +69,7 @@ def split_df(df, sgkf_n_splits=10, skf_n_splits=10, verbose=False, plot_dist=Tru
 
     print_div()
     print('Calculating stats for existing combined subsets')
-    intersect_stats(_dfa_train, _dfa_test, key="name_viewpoint")
-    intersect_stats(_dfa_train, _dfa_val, key="name_viewpoint", a_name="train", b_name="val")
+    intersect_stats(_dfa_train, _dfa_test, _dfa_val, key="name_viewpoint")
 
     if plot_dist:
         plot_distribution(_dfa_train, _dfa_test, _dfa_val)
@@ -104,8 +103,9 @@ def stratified_split(df, group_col, n_splits, random_state):
     y = df_comb['image_count']
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     
-    for i, (train_index, test_index) in enumerate(skf.split(X, y)):
-        break
+    # for i, (train_index, test_index) in enumerate(skf.split(X, y)):
+    #     break
+    train_index, test_index = next(skf.split(X, y))
 
     dfa_train = df_comb.iloc[train_index]
     dfa_existing = df_comb.iloc[test_index]
@@ -113,7 +113,7 @@ def stratified_split(df, group_col, n_splits, random_state):
     return dfa_train, dfa_existing
 
 def filter_min_df(df, min_count):
-    return df.groupby('name').filter(lambda g: len(g) >= min_count)
+    return df.groupby(['name', 'viewpoint']).filter(lambda g: len(g) >= min_count)
 
 def plot_distribution(train_df, test_df, val_df):
     fig, ax = plt.subplots()
