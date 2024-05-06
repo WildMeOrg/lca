@@ -9,6 +9,8 @@ def intersect_stats(df_a, df_b, df_c=None, key="name", a_name="train", b_name="t
     names_a = df_a[key].unique()
     names_b = df_b[key].unique()
 
+    print(f"Number of annotations - total: ", len(df_a) + len(df_b) + len(df_c) if df_c is not None else len(df_a) + len(df_b))
+
 
     print(f"number of individuals in {a_name}: ", len(names_a))
     print(f"number of annotations in {a_name}: ", len(df_a))
@@ -16,11 +18,15 @@ def intersect_stats(df_a, df_b, df_c=None, key="name", a_name="train", b_name="t
     print(f"number of individuals in {b_name}: ", len(names_b))
     print(f"number of annotations in {b_name}: ", len(df_b))
     print()
+        
     if df_c is not None:
         names_c = df_c[key].unique()
         print(f"number of individuals in {c_name}: ", len(names_c))
         print(f"number of annotations in {c_name}: ", len(df_c))
         print()
+        print(f"{a_name} ratio: ", len(df_a)/(len(df_a) + len(df_b) + len(df_c)))
+    else:
+        print(f"{a_name} ratio: ", len(df_a)/(len(df_a) + len(df_b)))
     print(f"average number of annotations per individual in {a_name}: {len(df_a) / len(names_a):.2f}")
     print(f"average number of annotations per individual in {b_name}: {len(df_b) / len(names_b):.2f}")
     if df_c is not None:
@@ -29,8 +35,11 @@ def intersect_stats(df_a, df_b, df_c=None, key="name", a_name="train", b_name="t
 
     print('- New individuals: ')
     names_diff_ab = np.setdiff1d(names_b, names_a)
+    # images_a = df_a['image_id'].unique()
+    # images_seen = df_b[df_b['image_id'].isin(images_a)]
     
-    print(f"number of new (unseen) individuals in {b_name}: {len(names_diff_ab)}")
+    # print(f"number of new (unseen) individuals in {b_name}: {len(names_diff_ab)}")
+    # print(f"number of seen images in {b_name}: {len(images_seen)}")
     print(f"ratio of new names to all individuals in {b_name}: {len(names_diff_ab) / len(names_b):.2f}")
     print()
     if df_c is not None:
@@ -39,17 +48,33 @@ def intersect_stats(df_a, df_b, df_c=None, key="name", a_name="train", b_name="t
         print(f"ratio of new names to all individuals in {c_name}: {len(names_diff_ac) / len(names_c):.2f}")
 
     print("- Individuals in sets: ")
-    len_intersect_ab = len(np.intersect1d(names_a, names_b))
+    common_individuals = set(names_a).intersection(names_b)
+    len_intersect_ab = len(common_individuals)
+    annotations_in_a = df_a[df_a[key].isin(common_individuals)].shape[0]
+    annotations_in_b = df_b[df_b[key].isin(common_individuals)].shape[0]
+
     
     print(f"number of overlapping individuals in {a_name} & {b_name}: {len_intersect_ab}")
     print(f"ratio of overlapping names to total individuals in {a_name}: {len_intersect_ab / len(names_a):.2f}")
     print(f"ratio of overlapping names to total individuals in {b_name}: {len_intersect_ab / len(names_b):.2f}")
+    print(f"Number of annotations in {a_name} for overlapping individuals with {b_name}: ", annotations_in_a)
+    print(f"Number of annotations in {b_name} for overlapping individuals with {a_name}: ", annotations_in_b)
+    if (annotations_in_b != 0):
+        print(f"ratio of annotations in {b_name} for overlapping individuals with {a_name}: ", annotations_in_b/(annotations_in_a + annotations_in_b))
+   
 
     if df_c is not None:
-        len_intersect_ac = len(np.intersect1d(names_a, names_c))
+        common_individuals = set(names_a).intersection(names_c)
+        len_intersect_ac = len(common_individuals)
+        annotations_in_a = df_a[df_a[key].isin(common_individuals)].shape[0]
+        annotations_in_c = df_c[df_c[key].isin(common_individuals)].shape[0]
         print(f"number of overlapping individuals in {a_name} & {c_name}: {len_intersect_ac}")
         print(f"ratio of overlapping names to total individuals in {a_name}: {len_intersect_ac / len(names_a):.2f}")
         print(f"ratio of overlapping names to total individuals in {c_name}: {len_intersect_ac / len(names_c):.2f}")
+        print(f"Number of annotations in {a_name} for overlapping individuals with {c_name}: ", annotations_in_a)
+        print(f"Number of annotations in {c_name} for overlapping individuals with {a_name}: ", annotations_in_c)
+        if (annotations_in_c != 0):
+            print(f"ratio of annotations in {c_name} for overlapping individuals with {a_name}: ", annotations_in_c/(annotations_in_a + annotations_in_c))
 
 
 def get_basic_stats(df_stat, min_filt=3, max_filt=None, individual_key='name'):
