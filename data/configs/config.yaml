@@ -1,0 +1,22 @@
+whaleshark:
+  data_dir: "/path/to/whaleshark/data"
+  export_dir: "{data_dir}/export_annotations"
+  train_images_dir: "{data_dir}/images/test2023"
+  train_anno_path: "{data_dir}/annotations/instances_train2023.json"
+  val_anno_path: "{data_dir}/annotations/instances_val2023.json"
+  test_anno_path: "{data_dir}/annotations/instances_test2023.json"
+  excluded_viewpoints: ['front', 'back', 'up', 'down']
+  csv_folder: "{data_dir}/csvs"
+
+giraffe:
+  data_dir: "/path/to/giraffe/data"
+  export_dir: "{data_dir}/export_annotations"
+  train_images_dir: "{data_dir}/images/test2023"
+  train_anno_path: "{data_dir}/annotations/instances_train2023.json"
+  val_anno_path: "{data_dir}/annotations/instances_val2023.json"
+  test_anno_path: "{data_dir}/annotations/instances_test2023.json"
+  excluded_viewpoints: ['front', 'back', 'up', 'down']
+  csv_folder: "{data_dir}/csvs"
+
+
+
