@@ -15,7 +15,7 @@ def write_json(data, out_path):
     with open(out_path, "w") as outfile:
         outfile.write(json_object)
         
-def export_annos(dfa, dfi, out_path):
+def export_annos(dfa, dfi, dfn, dfc, out_path):
     """
     Export annotations and images dataframes to a JSON file.
 
@@ -33,6 +33,8 @@ def export_annos(dfa, dfi, out_path):
     # Convert DataFrames to dictionaries
     annos_list = dfa.to_dict(orient='records')
     images_list = dfi.to_dict(orient='records')
+    individuals_list = dfn.to_dict(orient='records')
+    categories_list = dfc.to_dict(orient='records')
     
     print('len(images_list):', len(images_list))
     print('len(annos_list):', len(annos_list))
@@ -41,9 +43,10 @@ def export_annos(dfa, dfi, out_path):
     data = {
         'info': {},
         'licenses': [],
+        'categories': categories_list,
         'images': images_list,
         'annotations': annos_list,
-        'parts': []
+        'individuals': individuals_list
     }
 
     # Write the data to the specified JSON file
@@ -60,18 +63,22 @@ def join_without_intersection(df, dfs, cols, left_on, right_on):
     dfs = dfs[cols]
     return (df.drop(dfs.columns, axis=1, errors="ignore")).merge(dfs, left_on=left_on, right_on=right_on, how='left')
 
-def final_join(df_tr, dfa, dfi, df):
+def final_join(df_tr, dfa, dfi, dfn, dfc, df):
     # Rename merged keys that originally changed names. These keys will be used for reference by MiewID
     dfa_uuids = df_tr['uuid_x'].unique()
     dfi_uuids = df_tr['uuid_y'].unique()
+    dfn_uuids = df_tr['individual_uuid'].unique()
+    dfc_uuids = df_tr['category_id'].unique()
 
 
     dfa_tr = dfa[dfa['uuid'].isin(dfa_uuids)]
 
     dfi_tr = dfi[dfi['uuid'].isin(dfi_uuids)]
+    dfn_tr = dfn[dfn['uuid'].isin(dfn_uuids)]
+    dfc_tr = dfc[dfc['id'].isin(dfc_uuids)]
 
 
-    merge_cols = ['uuid_x', 'name_viewpoint', 'species_viewpoint', 'species', 'uuid_y', 'viewpoint', 'name']
+    merge_cols = ['uuid_x', 'name_viewpoint', 'species_viewpoint', 'species', 'uuid_y', 'viewpoint']
     
     dfa_tr = join_without_intersection(dfa_tr, df, merge_cols, left_on='uuid', right_on='uuid_x').drop('uuid_x', 1)
 
@@ -80,7 +87,7 @@ def final_join(df_tr, dfa, dfi, df):
 
     merge_cols = ['uuid_x', 'bbox']
     dfa_tr = join_without_intersection(dfa_tr, df, merge_cols, left_on='uuid', right_on='uuid_x').drop('uuid_x', 1).drop('uuid_y', axis=1)
-    return dfa_tr, dfi_tr
+    return dfa_tr, dfi_tr, dfn_tr, dfc_tr
 
 def assign_viewpoint(viewpoint, excluded_viewpoints):
     """
@@ -125,7 +132,7 @@ def assign_viewpoints(df, excluded_viewpoints):
 
 def filter_by_csv(df, csv_folder, 
                 csv_column_names=['annotation_uuid', 'species', 'viewpoint', 'name_uuid', 'name', 'date'], 
-                merge_columns=['annotation_uuid', 'date']):
+                merge_cols=['annotation_uuid', 'date']):
     """
     Filter and merge a DataFrame using CSV files in a specified folder.
 
@@ -158,7 +165,7 @@ def filter_by_csv(df, csv_folder,
     print("Annotations after CSV merge:", len(df))
 
     # Merge DataFrames using 'join_without_intersection' function (assuming this function is defined elsewhere)
-    df = join_without_intersection(df, concatenated_csv, merge_columns, left_on='uuid_x', right_on='annotation_uuid')
+    df = join_without_intersection(df, concatenated_csv, merge_cols, left_on='uuid_x', right_on='annotation_uuid')
 
     return df
 

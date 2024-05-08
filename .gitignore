@@ -15,3 +15,4 @@ test_*.png
 lca.decisions.csv
 
 data/configs/config_*.yaml
+data/run_preprocess_*

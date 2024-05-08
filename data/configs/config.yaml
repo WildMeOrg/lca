@@ -1,22 +1,24 @@
 whaleshark:
   data_dir: "/path/to/whaleshark/data"
-  export_dir: "{data_dir}/export_annotations"
-  train_images_dir: "{data_dir}/images/test2023"
-  train_anno_path: "{data_dir}/annotations/instances_train2023.json"
-  val_anno_path: "{data_dir}/annotations/instances_val2023.json"
-  test_anno_path: "{data_dir}/annotations/instances_test2023.json"
+  export_dir: "{data_dir}/split"
+  images_dir: "{data_dir}/images/test2023"
+  raw_annotation_path: "{data_dir}/annotations/instances_test2023.json"
+  preprocessed_annotation_path: "{data_dir}/preprocessed/whaleshark.json"
   excluded_viewpoints: ['front', 'back', 'up', 'down']
-  csv_folder: "{data_dir}/csvs"
+  csv_dir: "{data_dir}/csvs"
+  csv_column_names: ['annotation_uuid', 'viewpoint_y']
+  merge_cols: ['annotation_uuid', 'viewpoint_y']
 
 giraffe:
   data_dir: "/path/to/giraffe/data"
-  export_dir: "{data_dir}/export_annotations"
-  train_images_dir: "{data_dir}/images/test2023"
-  train_anno_path: "{data_dir}/annotations/instances_train2023.json"
-  val_anno_path: "{data_dir}/annotations/instances_val2023.json"
-  test_anno_path: "{data_dir}/annotations/instances_test2023.json"
-  excluded_viewpoints: ['front', 'back', 'up', 'down']
-  csv_folder: "{data_dir}/csvs"
+  export_dir: "{data_dir}/split"
+  images_dir: "{data_dir}/images/test2023"
+  raw_annotation_path: "{data_dir}/annotations/instances_train2023.json"
+  preprocessed_annotation_path: "{data_dir}/annotations/preprocessed.json"
+  excluded_viewpoints: []
+  csv_dir: "{data_dir}/csvs"
+  csv_column_names: ['annotation_uuid', 'species', 'viewpoint', 'name_uuid', 'name', 'date']
+  merge_cols: ['annotation_uuid', 'viewpoint_y']
 
 
 
