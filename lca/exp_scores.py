@@ -4,7 +4,7 @@ import math as m
 import random
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 class exp_scores(object):  # NOQA

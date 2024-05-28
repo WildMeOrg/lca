@@ -2,18 +2,18 @@
 import datetime as dt
 import networkx as nx
 
-from wbia_lca import cid_to_lca
-from wbia_lca import cluster_tools as ct
-from wbia_lca import draw_lca
-from wbia_lca import lca
-from wbia_lca import lca_alg1 as alg1
-from wbia_lca import lca_alg2 as alg2
-from wbia_lca import lca_queues
-from wbia_lca import logging
-from wbia_lca import weight_manager as wm
+import cid_to_lca
+import cluster_tools as ct
+import draw_lca
+import lca
+import lca_alg1 as alg1
+import lca_alg2 as alg2
+import lca_queues
+import logging
+import weight_manager as wm
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 """

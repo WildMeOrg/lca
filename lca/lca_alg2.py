@@ -2,12 +2,12 @@
 import networkx as nx
 import logging
 
-from wbia_lca import lca_alg1 as a1
-from wbia_lca import cluster_tools as ct
-from wbia_lca import test_cluster_tools as tct
+import lca_alg1 as a1
+import cluster_tools as ct
+import test_cluster_tools as tct
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 def build_initial_from_constraints(G, in_same):

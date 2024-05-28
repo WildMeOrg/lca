@@ -2,10 +2,10 @@
 import logging
 import networkx as nx
 
-from wbia_lca import graph_algorithm as ga
+import graph_algorithm as ga
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 def check_line(name, corr, actual):
@@ -888,7 +888,7 @@ def test_graph_algorithm():
     log_file = './test_graph_algorithm.log'
     log_level = logging.INFO
 
-    from wbia_lca import formatter
+    import formatter
 
     handler = logging.FileHandler(log_file, mode='w')
     handler.setLevel(log_level)

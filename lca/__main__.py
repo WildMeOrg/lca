@@ -2,16 +2,16 @@
 import logging
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 def main():  # nocover
-    import utool
+    # import utool
 
-    logger.info('Looks like the imports worked')
-    logger.info('utool = {!r}'.format(utool))
-    logger.info('utool.__file__ = {!r}'.format(utool.__file__))
-    logger.info('utool.__version__ = {!r}'.format(utool.__version__))
+    # logger.info('Looks like the imports worked')
+    # logger.info('utool = {!r}'.format(utool))
+    # logger.info('utool.__file__ = {!r}'.format(utool.__file__))
+    # logger.info('utool.__version__ = {!r}'.format(utool.__version__))
 
     import networkx
 
@@ -23,6 +23,6 @@ def main():  # nocover
 if __name__ == '__main__':
     """
     CommandLine:
-       python -m wbia_lca.__main__
+       python -m lca.__main__
     """
     main()

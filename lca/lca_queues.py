@@ -22,10 +22,10 @@ start of each outer loop of the LCA algorithm.
 
 import logging
 
-from wbia_lca import lca_heap as lh
+import lca_heap as lh
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 class lca_queues(object):  # NOQA

@@ -2,10 +2,10 @@
 import networkx as nx
 import logging
 
-from wbia_lca import cluster_tools as ct
+import cluster_tools as ct
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 """

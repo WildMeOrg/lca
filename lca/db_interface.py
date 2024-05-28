@@ -18,10 +18,10 @@ to avoid errors.
 import logging
 import networkx as nx
 
-from wbia_lca import cluster_tools as ct
+import cluster_tools as ct
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 class db_interface(object):  # NOQA
@@ -57,11 +57,11 @@ class db_interface(object):  # NOQA
     #     """
     #     return self.get_weight_db(triple)
 
-    # def edges_from_attributes(self, n0, n1):
-    #     try:
-    #         return self.edges_from_attributes_db(n0, n1)
-    #     except KeyError:
-    #        return None
+    def edges_from_attributes(self, n0, n1):
+        try:
+            return self.edges_from_attributes_db(n0, n1)
+        except KeyError:
+           return None
 
     def cluster_exists(self, cid):
         """

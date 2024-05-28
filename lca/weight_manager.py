@@ -29,7 +29,7 @@ import collections
 import logging
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 def empty_gen(n):
@@ -214,7 +214,7 @@ def test_weight_manager():
     log_file = './test.log'
     log_level = logging.INFO
 
-    from wbia_lca import formatter
+    import formatter
 
     handler = logging.FileHandler(log_file, mode='w')
     handler.setLevel(log_level)

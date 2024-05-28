@@ -12,7 +12,7 @@ during percolate up and percolate down.
 import logging
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 class lca_heap(object):  # NOQA

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 import networkx as nx
-from wbia_lca import cluster_tools as ct
+import cluster_tools as ct
 import logging
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 def ex_graph_fig1():

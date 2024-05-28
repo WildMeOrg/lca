@@ -4,16 +4,20 @@ import datetime as dt
 import logging
 import networkx as nx
 
-from wbia_lca import cluster_tools as ct
-from wbia_lca import compare_clusterings
-from wbia_lca import db_interface_sim
-from wbia_lca import edge_generator
-from wbia_lca import exp_scores as es
-from wbia_lca import graph_algorithm as ga
-from wbia_lca import weighter
+import cluster_tools as ct
+import compare_clusterings
+import db_interface_sim
+import edge_generator
+import exp_scores as es
+import graph_algorithm as ga
+import weighter
+from init_logger import get_formatter
+
+   
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
+
 
 
 """
@@ -144,17 +148,15 @@ def params_and_weighters(config_ini, verifier_gt):
     log_file = config_ini['LOGGING']['log_file']
     ga_params['log_file'] = log_file
 
-    from wbia_lca import formatter
-
     handler = logging.FileHandler(log_file, mode='w')
     handler.setLevel(log_level)
-    handler.setFormatter(formatter)
+    handler.setFormatter(get_formatter())
     logger.addHandler(handler)
 
-    print(log_file)
-    print(log_level)
-    print(formatter)
-    print(handler)
+    # print(log_file)
+    # print(log_level)
+    # print(formatter)
+    # print(handler)
 
     ga_params['draw_iterations'] = config_ini['DRAWING'].getboolean('draw_iterations')
     ga_params['drawing_prefix'] = config_ini['DRAWING']['drawing_prefix']
@@ -456,7 +458,7 @@ def test_ga_driver():
     log_file = './test_ga_driver.log'
     log_level = ga_params['log_level']
 
-    from wbia_lca import formatter
+    import formatter
 
     handler = logging.FileHandler(log_file)
     handler.setLevel(log_level)
@@ -604,5 +606,5 @@ def test_ga_driver():
         i += 1
 
 
-if __name__ == '__main__':
-    test_ga_driver()
+# if __name__ == '__main__':
+#     test_ga_driver()

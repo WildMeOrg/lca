@@ -1,3 +1,6 @@
+typing-extensions 
+h5py
+wheel
 matplotlib
 networkx
 numpy

@@ -3,11 +3,11 @@ import logging
 import math as m
 import random
 
-from wbia_lca import exp_scores as es
+import exp_scores as es
 
 #  Need to add weight according to verifier names!!!
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 class weighter(object):  # NOQA

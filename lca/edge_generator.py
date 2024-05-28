@@ -5,7 +5,7 @@
 import logging
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 class edge_generator(object):  # NOQA

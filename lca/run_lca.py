@@ -1,6 +1,6 @@
 import os
 import utool as ut
-from wbia_lca._plugin import OVERALL_CONFIG_FILE
+from lca._plugin import OVERALL_CONFIG_FILE
 
 
 """
@@ -142,7 +142,7 @@ def write_overall_config():
 """
 
 def run_ranking(ibs, daids, qaids=None, run_qaids_against_themselves=True, return_ranking=True):
-    from wbia_lca._plugin import LCAActor
+    from lca._plugin import LCAActor
     from collections import defaultdict
 
     write_overall_config()
@@ -213,7 +213,7 @@ def run_lca(
 ):
     import requests
     import json
-    from wbia_lca._plugin import LCAActor
+    from lca._plugin import LCAActor
 
     global OVERALL_CONFIG
     OVERALL_CONFIG['run_on_all_names'] = run_on_all_names

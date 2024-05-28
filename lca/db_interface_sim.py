@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 import logging
 
-from wbia_lca import compare_clusterings
-from wbia_lca import db_interface
+import compare_clusterings
+import db_interface
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 """

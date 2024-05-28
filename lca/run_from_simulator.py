@@ -3,16 +3,16 @@ from datetime import datetime
 import logging
 import sys
 
-from wbia_lca import baseline
-from wbia_lca import cluster_tools as ct
+import baseline
+import cluster_tools as ct
 
-from wbia_lca import exp_scores as es
-from wbia_lca import graph_algorithm as ga
-from wbia_lca import simulator as sim
-from wbia_lca import weighter as wgtr
+import exp_scores as es
+import graph_algorithm as ga
+import simulator as sim
+import weighter as wgtr
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 def get_base_params():
@@ -247,7 +247,7 @@ def one_simulation(out_path, file_prefix, sim_params, ga_params):
     simulation information into the log file. It should not be done
     when running with "live" data.
     """
-    from wbia_lca import formatter
+    import formatter
 
     handler = logging.FileHandler(log_file, mode='w')
     handler.setLevel(ga_params['log_level'])

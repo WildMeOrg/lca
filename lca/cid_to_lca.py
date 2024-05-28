@@ -3,7 +3,7 @@ import collections
 import logging
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 class CID2LCA(object):

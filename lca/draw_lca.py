@@ -21,7 +21,7 @@ import networkx as nx
 import random
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 def random_hex_rgb():

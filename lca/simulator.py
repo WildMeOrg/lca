@@ -8,12 +8,12 @@ import random
 from scipy.special import comb
 from scipy.stats import gamma
 
-from wbia_lca import cluster_tools as ct
-from wbia_lca import exp_scores as es
-from wbia_lca import weighter as wgtr
+import cluster_tools as ct
+import exp_scores as es
+import weighter as wgtr
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 class simulator(object):  # NOQA

@@ -4,7 +4,7 @@ import logging
 import math
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 def cids_from_range(n, prefix='c'):

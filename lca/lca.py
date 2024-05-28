@@ -4,11 +4,11 @@ import math
 import random as rnd
 import networkx as nx
 
-from wbia_lca import cluster_tools as ct
-from wbia_lca import test_cluster_tools as tct
+import cluster_tools as ct
+import test_cluster_tools as tct
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 """

@@ -5,17 +5,17 @@ import logging
 import json
 import sys
 
-from wbia_lca import ga_driver
-from wbia_lca import db_interface_sim
-from wbia_lca import edge_generator_sim
+import ga_driver
+import db_interface_sim
+import edge_generator_sim
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 """
 This is a top-level driver for the LCA graph algorithm, written mostly
-to illustrate use of the graph algorithm through small examples and
+to illustrate use of the graph algorithm through smallconda examples and
 simulations. Of particular note there are two objects created here
 that must be replaced by objects that are connected to "real"
 information about animals:  the edge and id database, and the
@@ -146,7 +146,13 @@ def extract_requests(request, db):
     return verifier_results, human_decisions, cluster_ids_to_check
 
 
+from init_logger import init_logger
 if __name__ == '__main__':
+    print("START")
+    init_logger()
+
+    logger = logging.getLogger('lca')
+    print(logger.handlers)
     parser = argparse.ArgumentParser('overall_driver.py')
     parser.add_argument(
         '--ga_config', type=str, required=True, help='graph algorithm config INI file'
@@ -172,10 +178,13 @@ if __name__ == '__main__':
     config_ini = configparser.ConfigParser()
     config_ini.read(args.ga_config)
 
+    print('step 1')
+
     # 2. Recent results from verification ground truth tests. Used to
     # establish the weighter.
     with open(args.verifier_gt, 'r') as fn:
         verifier_gt = json.loads(fn.read())
+    print('step 2')
 
     # 3. Form the parameters dictionary and weight objects (one per
     # verification algorithm).
@@ -184,6 +193,8 @@ if __name__ == '__main__':
         logger.info('Not currently handling more than one weighter!!')
         sys.exit(1)
     wgtr = wgtrs[0]
+
+    print('step 3')
 
     # 4. Get the request dictionary, which includes the database, the
     # actual request edges and clusters, and the edge generator edges
@@ -195,15 +206,21 @@ if __name__ == '__main__':
     edge_gen = form_edge_generator(request, db, wgtr)
     verifier_req, human_req, cluster_req = extract_requests(request, db)
 
+    print('step 4')
+
     # 5. Form the graph algorithm driver
     driver = ga_driver.ga_driver(
         verifier_req, human_req, cluster_req, db, edge_gen, ga_params
     )
 
+    print('step 5')
+
     # 6. Run it. Changes are logged.
     ccPIC_gen = driver.run_all_ccPICs()
     changes_to_review = list(ccPIC_gen)
     logger.info(changes_to_review)
+
+    print('step 6')
 
     # 7. Commit changes. Record them in the database and the log
     # file.

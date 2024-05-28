@@ -2,11 +2,11 @@
 import networkx as nx
 import logging
 
-from wbia_lca import cluster_tools as ct
-from wbia_lca import test_cluster_tools as tct
+import cluster_tools as ct
+import test_cluster_tools as tct
 
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 def best_shift(n0, n1, G, clustering, node2cid, trace_on=False):

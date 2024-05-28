@@ -10,8 +10,8 @@ import logging
 import utool as ut
 from functools import partial
 
-from wbia_lca import db_interface
-from wbia_lca import edge_generator
+import db_interface
+import edge_generator
 
 # import configparser
 import threading
@@ -19,11 +19,11 @@ import random
 
 # import json
 
-from wbia_lca import ga_driver
+import ga_driver
 
 import tqdm
 
-logger = logging.getLogger('wbia_lca')
+logger = logging.getLogger('lca')
 
 
 _, register_ibs_method = controller_inject.make_ibs_register_decorator(__name__)
@@ -708,7 +708,7 @@ class LCAActor(GraphActor):
             'log_level': logging.INFO,
             'log_file': LOG_LCA_FILE,
             'draw_iterations': False,
-            'drawing_prefix': 'wbia_lca',
+            'drawing_prefix': 'lca',
         }
 
         prob_human_correct = actor.lca_config.get(
@@ -724,7 +724,7 @@ class LCAActor(GraphActor):
             'simreview.prob_human_correct': prob_human_correct,
         }
 
-        from wbia_lca import formatter
+        import formatter
 
         handler = logging.FileHandler(actor.lca_config['log_file'])
         handler.setLevel(actor.lca_config['log_level'])
@@ -1869,7 +1869,7 @@ class LCAClient(GraphClient):
 if __name__ == '__main__':
     r"""
     CommandLine:
-        python -m wbia_lca._plugin
+        python -m lca._plugin
     """
     # import xdoctest
 
