@@ -153,7 +153,7 @@ if __name__ == '__main__':
 
     logger = logging.getLogger('lca')
     print(logger.handlers)
-    parser = argparse.ArgumentParser('overall_driver.py')
+    parser = argparse.ArgumentParser('example_driver.py')
     parser.add_argument(
         '--ga_config', type=str, required=True, help='graph algorithm config INI file'
     )

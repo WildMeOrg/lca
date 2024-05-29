@@ -33,7 +33,7 @@ import lca_alg1  # NOQA
 import lca_alg2  # NOQA
 import lca_heap  # NOQA
 import lca_queues  # NOQA
-import overall_driver  # NOQA
+import example_driver  # NOQA
 import run_from_simulator  # NOQA
 import simulator  # NOQA
 import test_cluster_tools  # NOQA

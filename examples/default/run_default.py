@@ -7,7 +7,7 @@ def test(fake_process):
     fake_process.allow_unregistered(True)
     process = subprocess.Popen(
         """
-        python lca/overall_driver.py \
+        python lca/example_driver.py \
             --ga_config examples/default/config.ini \
             --verifier_gt examples/default/verifier_probs.json \
             --request examples/default/request_example.json \

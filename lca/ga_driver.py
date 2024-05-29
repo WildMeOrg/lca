@@ -66,7 +66,7 @@ Not created by functionality here are
 Both are created separately based on the source of the data for the
 graph algorithm, whether it be from simulation or from a true animal
 id database and real human reviewers. There are abstract base class
-interfaces to these.  See overall_driver.py for examples of creating
+interfaces to these.  See example_driver.py for examples of creating
 these for simulations.
 
 The work flow proceeds in the following stages

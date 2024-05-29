@@ -47,7 +47,7 @@ There are no significant changes here.
 
 ##  Command-line
 
-python wbia_lca/overall_driver.py \
+python wbia_lca/example_driver.py \
     --ga_config examples/default/config.ini \
     --verifier_gt examples/default/verifier_probs.json \
     --request examples/default/request_example.json \

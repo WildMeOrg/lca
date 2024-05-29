@@ -36,7 +36,7 @@ verification.
 
 ##  Command-line
 
-python wbia_lca/overall_driver.py \
+python wbia_lca/example_driver.py \
     --ga_config examples/zero/config.ini \
     --verifier_gt examples/zero/verifier_probs.json \
     --request examples/zero/request_example.json \
