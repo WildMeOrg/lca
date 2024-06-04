@@ -13,7 +13,7 @@ db_interface class which interfaces to the LCA code.
 class db_interface_generic(db_interface.db_interface):
     def __init__(self, db_file, clustering):
         self.db_file = db_file
-
+        # DB interface should be modified to handle the initial file not being created yet, add clustering, json
         # To do:  replace with use of pandas to make it more robust.
 
         with open(self.db_file, 'r') as f:
@@ -166,8 +166,8 @@ signal.
 def generate_wgtr_calibration_ground_truth(verifier_edges,
                                            human_reviewer,
                                            num_pos_needed,
-                                           num_neg_needed)
-{
+                                           num_neg_needed):
+
     # Method: The range of scores is divided up into equally-sized
     # bins and the verifier edges are assigned to the bins based
     # on their score.  After shuffling each bins, edges are picked
@@ -182,7 +182,7 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
     max_score = max(scores)
     delta_score = (max_score - min_score) / num_bins
     bins = [[] for _ in range(num_bins)]
-    for n0, n1, s in verified_edges:
+    for n0, n1, s in verifier_edges:
         i = int((s - min_score) / delta_score)
         bins[i].append((n0, n1, s))
 
@@ -202,12 +202,12 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
         else:
             n0, n1, s = bins[i][-1]
             edge_nodes.append((n0, n1))
-            edge_scores[(n0, n1)] = stability
+            edge_scores[(n0, n1)] = s #tability
             del bins[i][-1]
             i = (i + 1) % len(bins)
 
     # 4. Send to the reviewer in small batches.
-    num_in_batch = max(4, (num_pos_need + num_neg_needed) // 2)
+    num_in_batch = max(4, (num_pos_needed + num_neg_needed) // 2)
     pos_triples = []
     neg_triples = []
     i = 0
@@ -297,13 +297,15 @@ class curate_using_LCA(object):
                  human_reviewer,
                  wgtrs_calib_dict,
                  edge_db_file,
-                 current_clustering,
+                 current_clustering, #maybe comes from db file
                  lca_config):
         self.verifier_alg = verifier_alg
         self.verifer_name = verifier_name
         self.human_reviewer = human_reviewer
         self.wgtrs_calib_dict = wgtrs_calib_dict
         self.lca_config = lca_config
+        self.edge_db_file = edge_db_file
+        self.current_clustering = current_clustering
 
         # 1. Create weighter from calibration
 
@@ -314,10 +316,10 @@ class curate_using_LCA(object):
 
         # 2. Update delta score thresholds in the lca config
         # This should probably be in a LCA-proper file
-        multiplier = actor.lca_config['min_delta_converge_multiplier']
-        ratio = actor.lca_config['min_delta_stability_ratio']
-        human_gt_positive_weight = actor.wgtr.human_wgt(is_marked_correct=True)
-        human_gt_negative_weight = actor.wgtr.human_wgt(is_marked_correct=False)
+        multiplier = self.lca_config['min_delta_converge_multiplier']
+        ratio = self.lca_config['min_delta_stability_ratio']
+        human_gt_positive_weight = self.wgtr.human_wgt(is_marked_correct=True)
+        human_gt_negative_weight = self.wgtr.human_wgt(is_marked_correct=False)
         human_gt_delta_weight = human_gt_positive_weight - human_gt_negative_weight
         convergence = -1.0 * multiplier * human_gt_delta_weight
         stability = convergence / ratio
@@ -328,7 +330,7 @@ class curate_using_LCA(object):
         self.db = db_interface_generic(self.edge_db_file, self.current_clustering)
 
         # 4. Create the edge generators
-        self.edge_gen = edge_generator_generic(self.db, self.wgtr, self.verifier_alg):
+        self.edge_gen = edge_generator_generic(self.db, self.wgtr, self.verifier_alg)
 
 
     def curate(self,
@@ -353,8 +355,8 @@ class curate_using_LCA(object):
             human_reviews,
             cluster_ids_to_check,
             self.db,
-            self.edge_generator,
-            self.lca_params
+            self.edge_gen,
+            self.lca_config
         )
 
         #  Create the iterator to run through each ccPIC subgraph.  The iterator
@@ -375,7 +377,7 @@ class curate_using_LCA(object):
                 #  
                 #  (a) If the yield is a StopIteration exception then the LCA
                 #  clustering work is done and we break out of the while loop
-                next_cluster_changes = next(self.ga_gen)
+                next_cluster_changes = next(ga_gen)
             except StopIteration:
                 break
 
