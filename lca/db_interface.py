@@ -41,13 +41,15 @@ class db_interface(object):  # NOQA
         Add edges to the nx.Graph and, if the edges are new, to the
         underlying database.
         """
-        self.edge_graph.add_edges_from([(n0, n1) for n0, n1, _, _ in quads])
+        self.edge_graph.add_edges_from(quads[['annot_id_1', 'annot_id_2']].itertuples(index=False))
+
         logger.info(f'Added {len(quads)} edges from quads')
         # num_components = len(list(nx.connected_components(self.edge_graph)))
         # logger.info(f'The current edge graph has {num_components} connected components')
         # logger.info(f'The current edge graph has {self.edge_graph.size()} edges')
         if are_edges_new:
             self.add_edges_db(quads)
+            self.add_clusters_db(quads)
 
     # def get_weight(self, triple):
     #     """
@@ -199,6 +201,9 @@ class db_interface(object):  # NOQA
         return self.commit_cluster_change_db(cc)
 
     def add_edges_db(self, quads):
+        raise NotImplementedError()
+    
+    def add_clusters_db(self, quads):
         raise NotImplementedError()
 
     # def get_weight_db(self, triple):

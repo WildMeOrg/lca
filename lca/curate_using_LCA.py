@@ -1,6 +1,9 @@
 import db_interface
 import edge_generator
 import ga_driver
+import os
+import json
+import pandas as pd
 
 
 """
@@ -10,27 +13,73 @@ edge giving the node/annotation ids, the weight and
 the augmentation name. It is subclassed from
 db_interface class which interfaces to the LCA code.
 """
-class db_interface_generic(db_interface.db_interface):
-    def __init__(self, db_file, clustering):
-        self.db_file = db_file
-        # DB interface should be modified to handle the initial file not being created yet, add clustering, json
-        # To do:  replace with use of pandas to make it more robust.
+def create_file(path):
+    dir_name = os.path.dirname(path)
+    
+    if not os.path.exists(dir_name):
+        os.makedirs(dir_name)
+    data = []
+    with open(path, 'w') as f:
+        json.dump(data, f)
 
-        with open(self.db_file, 'r') as f:
-            lines = f.read().split('\n')
-        lines = [line.strip().split() for line in lines]
-        quads = [
-            (int(n0), int(n1), int(wgt), aug_name)    # need to make this more general -- UUIDs for example
-            for n0, n1, wgt, aug_name in lines
-        ]
+    return path
+
+
+
+
+class db_interface_generic(db_interface.db_interface):
+    def __init__(self, db_file, clustering_file):
+        self.db_file = db_file if os.path.exists(db_file) else create_file(db_file)
+        self.clustering_file = clustering_file if os.path.exists(clustering_file) else create_file(clustering_file)
+
+        quads_columns = ["annot_id_1", "annot_id_2", "weight", "aug_method"]
+        df_quads = pd.read_json(self.db_file)
+        if df_quads.empty:
+            df_quads = pd.DataFrame(columns=quads_columns)
+        else:
+            df_quads.columns = quads_columns
+
+        print(df_quads)
+
+
+        clustering_columns = ["annot_id", "cluster"]
+        df_clustering = pd.read_json(clustering_file)
+        if df_clustering.empty:
+            df_clustering = pd.DataFrame(columns=clustering_columns)
+        else:
+            df_clustering.columns = ["annot_id", "cluster"]
+        print(df_clustering)
 
         # Output stats to the logger
-        super(db_interface_generic, self).__init__(quads, clustering, are_edges_new=False)
+        super(db_interface_generic, self).__init__(df_quads, df_clustering, are_edges_new=False)
 
     def add_edges_db(self, quads):
-        with open(self.db_file, 'a') as f:
-            for n0, n1, w, aug_name in quads:
-                f.write(f'{n0},{n1},{w},{aug_name}\n')
+        with open(self.db_file, 'r') as f:
+            existing_data = json.load(f)
+
+        new_data = quads.to_dict(orient='records')
+
+        existing_data.extend(new_data)
+
+        with open(self.db_file, 'w') as f:
+            json.dump(existing_data, f, indent=4)
+
+    def add_clusters_db(self, quads):
+        with open(self.clustering_file, 'r') as f:
+            existing_data = json.load(f)
+
+        existing_annots = {row['annot_id'] for row in existing_data}
+        index = max((row['cluster'] for row in existing_data), default=-1) + 1
+
+        new_annot_ids = {quad["annot_id_1"] for _, quad in quads.iterrows() if quad["annot_id_1"] not in existing_annots} | \
+                        {quad["annot_id_2"] for _, quad in quads.iterrows() if quad["annot_id_2"] not in existing_annots}
+
+        new_data = [{"annot_id": annot_id, "cluster": i} for i, annot_id in enumerate(new_annot_ids, start=index)]
+        existing_data.extend(new_data)
+
+        with open(self.clustering_file, 'w') as f:
+            json.dump(existing_data, f, indent=2)
+
         """
         The following was for recording attributes in the NetworkX graph.
         It does not appear to be needed
