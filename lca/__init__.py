@@ -34,7 +34,7 @@ import lca_alg2  # NOQA
 import lca_heap  # NOQA
 import lca_queues  # NOQA
 import example_driver  # NOQA
-import lca.old_plugin.run_from_simulator as run_from_simulator  # NOQA
+import run_from_simulator as run_from_simulator  # NOQA
 import simulator  # NOQA
 import test_cluster_tools  # NOQA
 import test_graph_algorithm  # NOQA

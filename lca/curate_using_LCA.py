@@ -4,6 +4,7 @@ import ga_driver
 import os
 import json
 import pandas as pd
+import random
 
 
 """
@@ -39,7 +40,6 @@ class db_interface_generic(db_interface.db_interface):
         else:
             df_quads.columns = quads_columns
 
-        print(df_quads)
 
 
         clustering_columns = ["annot_id", "cluster"]
@@ -48,7 +48,6 @@ class db_interface_generic(db_interface.db_interface):
             df_clustering = pd.DataFrame(columns=clustering_columns)
         else:
             df_clustering.columns = ["annot_id", "cluster"]
-        print(df_clustering)
 
         # Output stats to the logger
         super(db_interface_generic, self).__init__(df_quads, df_clustering, are_edges_new=False)
@@ -226,14 +225,14 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
 
     # 1. For the bins
     num_bins = 10
-    scores = [s for _, _, s in verifier_edges]
+    scores = verifier_edges['weight'].tolist()
     min_score = min(scores)
     max_score = max(scores)
-    delta_score = (max_score - min_score) / num_bins
+    delta_score = (max_score - min_score) / (num_bins-1)
     bins = [[] for _ in range(num_bins)]
-    for n0, n1, s in verifier_edges:
-        i = int((s - min_score) / delta_score)
-        bins[i].append((n0, n1, s))
+    for index, row in verifier_edges.iterrows():
+        i = int((row['weight'] - min_score) / delta_score)
+        bins[i].append((row['annot_id_1'], row['annot_id_2'], row['weight']))
 
     # 2. Shuffle each bin
     for i in range(num_bins):
@@ -251,7 +250,7 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
         else:
             n0, n1, s = bins[i][-1]
             edge_nodes.append((n0, n1))
-            edge_scores[(n0, n1)] = s #tability
+            edge_scores[(n0, n1)] = s
             del bins[i][-1]
             i = (i + 1) % len(bins)
 
@@ -260,6 +259,7 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
     pos_triples = []
     neg_triples = []
     i = 0
+    quit_lca = False
     while i < len(edge_nodes):
         j = min(i + num_in_batch, len(edge_nodes))
         reviews, quit_lca = human_reviewer(edge_nodes[i: j])
@@ -273,6 +273,7 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
                 neg_triples.append(e)
         if len(pos_triples) >= num_pos_needed and len(neg_triples) >= num_neg_needed:
             break
+        i = j
 
     return pos_triples, neg_triples, quit_lca
 
