@@ -41,7 +41,7 @@ class db_interface(object):  # NOQA
         Add edges to the nx.Graph and, if the edges are new, to the
         underlying database.
         """
-        self.edge_graph.add_edges_from(quads[['annot_id_1', 'annot_id_2']].itertuples(index=False))
+        self.edge_graph.add_edges_from([(n0, n1) for n0, n1, _, _ in quads])
 
         logger.info(f'Added {len(quads)} edges from quads')
         # num_components = len(list(nx.connected_components(self.edge_graph)))
@@ -49,7 +49,7 @@ class db_interface(object):  # NOQA
         # logger.info(f'The current edge graph has {self.edge_graph.size()} edges')
         if are_edges_new:
             self.add_edges_db(quads)
-            self.add_clusters_db(quads)
+            # self.add_clusters_db(quads)
 
     # def get_weight(self, triple):
     #     """
@@ -144,6 +144,7 @@ class db_interface(object):  # NOQA
         Find all edges between any pair of nodes in the node set.
         """
         quads = []
+        
         node_list = sorted(node_set)
         for i, ni in enumerate(node_list):
             for j in range(i + 1, len(node_list)):

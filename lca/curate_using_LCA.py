@@ -5,6 +5,7 @@ import os
 import json
 import pandas as pd
 import random
+import logging
 
 
 """
@@ -29,59 +30,58 @@ def create_file(path):
 
 
 class db_interface_generic(db_interface.db_interface):
-    def __init__(self, db_file, clustering_file):
+    def __init__(self, db_file, clustering):
         self.db_file = db_file if os.path.exists(db_file) else create_file(db_file)
-        self.clustering_file = clustering_file if os.path.exists(clustering_file) else create_file(clustering_file)
-
-        quads_columns = ["annot_id_1", "annot_id_2", "weight", "aug_method"]
-        df_quads = pd.read_json(self.db_file)
-        if df_quads.empty:
-            df_quads = pd.DataFrame(columns=quads_columns)
-        else:
-            df_quads.columns = quads_columns
+        # self.clustering_file = clustering_file if os.path.exists(clustering_file) else create_file(clustering_file)
 
 
-
-        clustering_columns = ["annot_id", "cluster"]
-        df_clustering = pd.read_json(clustering_file)
-        if df_clustering.empty:
-            df_clustering = pd.DataFrame(columns=clustering_columns)
-        else:
-            df_clustering.columns = ["annot_id", "cluster"]
+        with open(self.db_file, 'r') as f:
+            lines = f.read().split('\n')
+        lines = [line.strip().split() for line in lines]
+        print('lines ', lines)
+        if len(lines) > 1:
+            quads = [
+                (int(n0), int(n1), int(wgt), aug_name)    # need to make this more general -- UUIDs for example
+                for n0, n1, wgt, aug_name in lines
+            ]
+        else: 
+            quads = []
 
         # Output stats to the logger
-        super(db_interface_generic, self).__init__(df_quads, df_clustering, are_edges_new=False)
+        super(db_interface_generic, self).__init__(quads, clustering, are_edges_new=False)
+
+        # quads_columns = ["annot_id_1", "annot_id_2", "weight", "aug_method"]
+        # df_quads = pd.read_json(self.db_file)
+        # if df_quads.empty:
+        #     df_quads = pd.DataFrame(columns=quads_columns)
+        # else:
+        #     df_quads.columns = quads_columns
+
+
+
+        # clustering_columns = ["annot_id", "cluster"]
+        # df_clustering = pd.read_json(clustering_file)
+        # if df_clustering.empty:
+        #     df_clustering = pd.DataFrame(columns=clustering_columns)
+        # else:
+        #     df_clustering.columns = ["annot_id", "cluster"]
+
+        # Output stats to the logger
+        super(db_interface_generic, self).__init__(quads, clustering, are_edges_new=False)
 
     def add_edges_db(self, quads):
         with open(self.db_file, 'r') as f:
             existing_data = json.load(f)
 
-        new_data = quads.to_dict(orient='records')
+        new_data = quads
 
         existing_data.extend(new_data)
 
         with open(self.db_file, 'w') as f:
             json.dump(existing_data, f, indent=4)
 
-    def add_clusters_db(self, quads):
-        with open(self.clustering_file, 'r') as f:
-            existing_data = json.load(f)
-
-        existing_annots = {row['annot_id'] for row in existing_data}
-        index = max((row['cluster'] for row in existing_data), default=-1) + 1
-
-        new_annot_ids = {quad["annot_id_1"] for _, quad in quads.iterrows() if quad["annot_id_1"] not in existing_annots} | \
-                        {quad["annot_id_2"] for _, quad in quads.iterrows() if quad["annot_id_2"] not in existing_annots}
-
-        new_data = [{"annot_id": annot_id, "cluster": i} for i, annot_id in enumerate(new_annot_ids, start=index)]
-        existing_data.extend(new_data)
-
-        with open(self.clustering_file, 'w') as f:
-            json.dump(existing_data, f, indent=2)
-
-        """
-        The following was for recording attributes in the NetworkX graph.
-        It does not appear to be needed
+        # The following was for recording attributes in the NetworkX graph.
+        # It does not appear to be needed
         for n0, n1, w, aug_name in quads:
             attrib = self.edge_graph[n0][n1]
             if aug_name == 'human':
@@ -90,10 +90,28 @@ class db_interface_generic(db_interface.db_interface):
                 attrib['human'].append(w)
             else:
                 attrib[aug_name] = w
-        """
 
-    """
-    Pretty sure this is not needed.  Eliminate from db_interface.py as well.
+    # def add_clusters_db(self, quads):
+    #     with open(self.clustering_file, 'r') as f:
+    #         existing_data = json.load(f)
+
+    #     existing_annots = {row['annot_id'] for row in existing_data}
+    #     index = max((row['cluster'] for row in existing_data), default=-1) + 1
+
+    #     new_annot_ids = {quad["annot_id_1"] for _, quad in quads.iterrows() if quad["annot_id_1"] not in existing_annots} | \
+    #                     {quad["annot_id_2"] for _, quad in quads.iterrows() if quad["annot_id_2"] not in existing_annots}
+
+    #     new_data = [{"annot_id": annot_id, "cluster": i} for i, annot_id in enumerate(new_annot_ids, start=index)]
+    #     existing_data.extend(new_data)
+
+    #     with open(self.clustering_file, 'w') as f:
+    #         json.dump(existing_data, f, indent=2)
+
+        
+    
+       
+
+    # Pretty sure this is not needed.  Eliminate from db_interface.py as well.
     def edges_from_attributes_db(self, n0, n1):
         quads = []
         attrib = self.edge_graph[n0][n1]
@@ -103,7 +121,7 @@ class db_interface_generic(db_interface.db_interface):
             else:
                 quads.append((n0, n1, wgt, a))
         return quads
-    """
+    
 
     """
     Pretty sure this is currently not needed
@@ -225,14 +243,15 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
 
     # 1. For the bins
     num_bins = 10
-    scores = verifier_edges['weight'].tolist()
+    scores = [s for _, _, s in verifier_edges]
     min_score = min(scores)
     max_score = max(scores)
     delta_score = (max_score - min_score) / (num_bins-1)
     bins = [[] for _ in range(num_bins)]
-    for index, row in verifier_edges.iterrows():
-        i = int((row['weight'] - min_score) / delta_score)
-        bins[i].append((row['annot_id_1'], row['annot_id_2'], row['weight']))
+    for n0, n1, s in verifier_edges:
+        i = int((s - min_score) / delta_score)
+        bins[i].append((n0, n1, s))
+
 
     # 2. Shuffle each bin
     for i in range(num_bins):
@@ -350,7 +369,7 @@ class curate_using_LCA(object):
                  current_clustering, #maybe comes from db file
                  lca_config):
         self.verifier_alg = verifier_alg
-        self.verifer_name = verifier_name
+        self.verifier_name = verifier_name
         self.human_reviewer = human_reviewer
         self.wgtrs_calib_dict = wgtrs_calib_dict
         self.lca_config = lca_config
@@ -380,7 +399,7 @@ class curate_using_LCA(object):
         self.db = db_interface_generic(self.edge_db_file, self.current_clustering)
 
         # 4. Create the edge generators
-        self.edge_gen = edge_generator_generic(self.db, self.wgtr, self.verifier_alg)
+        self.edge_gen = edge_generator_generic(self.db, self.wgtr, self.verifier_alg, self.verifier_name)
 
 
     def curate(self,
@@ -390,6 +409,8 @@ class curate_using_LCA(object):
 
         #  Add the name of the verifier to each ranker / verifier result
         #  This is not necessary for the human reviews.
+
+        logger = logging.getLogger('lca')
         verifier_results = [
             (n0, n1, s, self.verifier_name)
             for n0, n1, s in verifier_results

@@ -330,8 +330,11 @@ class ga_driver(object):  # NOQA
     def form_ccPICs(self):
         self.ccPICs = []
         cid_graph = nx.Graph()
+        
         cid_graph.add_nodes_from(self.direct_cids)
         cid_graph.add_edges_from(self.cid_pairs)
+
+        
         for cc in nx.connected_components(cid_graph):
             cids = list(cc)
             clustering = {}

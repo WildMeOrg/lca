@@ -44,6 +44,7 @@ def build_clustering_from_clusters(cids, clusters):
 
 
 def build_node_to_cluster_mapping(clustering):
+    # print('cluster:', clustering)
     """
     clustering: mapping from cluster id to set of node ids
     node2cluster: mapping from node id to cluster id
