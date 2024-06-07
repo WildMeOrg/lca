@@ -8,7 +8,7 @@ import os
 import configparser
 from init_logger import init_logger, get_formatter
 
-# init_logger()
+init_logger()
 
 gt_path = 'lca/tmp/zebra_gt.json'
 
@@ -31,16 +31,23 @@ def get_score(node_1, node_2, score_path=gt_path):
         if {row[0], row[1]} == {node_1, node_2}:
             return row[2]
     
-    return False
+    return 0.0001
 
-def human_reviewer(edge_nodes):
+def human_reviewer(edge_nodes, get_quit=False):
+    logger = logging.getLogger('lca')
     reviews = [(n0, n1, get_review(n0, n1)) for n0, n1 in edge_nodes]
     quit_lca = False
-    return reviews, quit_lca
+    if get_quit:
+        return reviews, quit_lca
+    logger.info(f'Reviews  {reviews} ')
+    return reviews
+    # return reviews, quit_lca
 
 
 def verifier_alg(edge_nodes):
-    scores = [(n0, n1, get_score(n0, n1)) for n0, n1 in edge_nodes]
+    logger = logging.getLogger('lca')
+    scores = [get_score(n0, n1) for n0, n1 in edge_nodes]
+    logger.info(f'Scores  {scores} ')
     return scores
 
 
@@ -71,7 +78,8 @@ def get_new_edges(input_path):
         result = []
         
         for row in data:
-            result.append([row[0], row[1], row[2]/100])
+            annot_ids = sorted([row[0], row[1]])
+            result.append([annot_ids[0], annot_ids[1], row[2] / 100])
         
         # df = pd.DataFrame(result, columns=["annot_id_1", "annot_id_2", "weight", "aug_method"])
         
@@ -145,11 +153,11 @@ def generate_ga_params(config_ini):
     ga_params['draw_iterations'] = config_ini['DRAWING'].getboolean('draw_iterations')
     ga_params['drawing_prefix'] = config_ini['DRAWING']['drawing_prefix']
 
-    # logger = logging.getLogger('lca')
-    # handler = logging.FileHandler(log_file, mode='w')
-    # handler.setLevel(log_level)
-    # handler.setFormatter(get_formatter())
-    # logger.addHandler(handler)
+    logger = logging.getLogger('lca')
+    handler = logging.FileHandler(log_file, mode='w')
+    handler.setLevel(log_level)
+    handler.setFormatter(get_formatter())
+    logger.addHandler(handler)
 
     return ga_params
     
@@ -162,7 +170,7 @@ def generate_ga_params(config_ini):
 #     curate
 
 
-input_path_initial = "lca/tmp/zebra_gt_initial.json"
+input_path = "lca/tmp/zebra_gt.json"
 input_path_additional = "lca/tmp/zebra_gt_add.json"
 edge_db_file = "lca/tmp/db/quads.json"
 clustering_file = "lca/tmp/db/clustering.json"
@@ -179,7 +187,7 @@ num_pos_needed = 50
 num_neg_needed = 50
 verifier_file =  "lca/tmp/db/verifiers_probs.json"
 
-verifier_edges = get_new_edges(input_path_initial)
+verifier_edges = get_new_edges(input_path)
 
 pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
 
@@ -189,8 +197,9 @@ config_ini = configparser.ConfigParser()
 config_ini.read(lca_config_file )
 lca_config = generate_ga_params(config_ini)
 
-verifier_results = get_new_edges(input_path_initial)
-human_reviews = get_new_reviews(input_path_initial)
+verifier_results = get_new_edges(input_path)
+# human_reviews = get_new_reviews(input_path)
+human_reviews = []
 
 
 
@@ -198,7 +207,15 @@ lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs
 
 clusters = lca_object.curate(verifier_results, human_reviews)
 
-for cluster in clusters[0]:
-    print(cluster.new_clustering)
+cluster_data = {}
 
-print(len(clusters[0]))
+
+for cluster in clusters[0]:
+    print( cluster.new_clustering)
+    for k, vals in cluster.new_clustering.items():
+        # print(k, vals)
+        cluster_data[k] = list(vals)
+    
+with open(clustering_file, 'w') as f:
+    json.dump(cluster_data, f)
+

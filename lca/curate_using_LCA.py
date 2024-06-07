@@ -281,7 +281,7 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
     quit_lca = False
     while i < len(edge_nodes):
         j = min(i + num_in_batch, len(edge_nodes))
-        reviews, quit_lca = human_reviewer(edge_nodes[i: j])
+        reviews, quit_lca = human_reviewer(edge_nodes[i: j], get_quit=True)
         if quit_lca:
             break
         for n0, n1, b in reviews:
