@@ -7,31 +7,25 @@ import logging
 import os
 import configparser
 from init_logger import init_logger, get_formatter
+from tools import *
+from meiwid_embeddings import MiewID_Embeddings
 
 init_logger()
 
-gt_path = 'lca/tmp/zebra_gt.json'
+#set human reviewer
+
+gt_path = 'lca/tmp/zebra_test_gt.json'
 
 def get_review(node_1, node_2, gt_path=gt_path, rate=0.98):
     with open(gt_path, 'r') as f:
         data = json.load(f)
 
+    is_similar = False
     for row in data:
         if {row[0], row[1]} == {node_1, node_2}:
-            return row[3] if random.random() < rate else not row[3]
+            is_similar=True
     
-    return False
-
-
-def get_score(node_1, node_2, score_path=gt_path):
-    with open(score_path, 'r') as f:
-        data = json.load(f)
-
-    for row in data:
-        if {row[0], row[1]} == {node_1, node_2}:
-            return row[2]
-    
-    return 0.0001
+    return is_similar if random.random() < rate else not is_similar
 
 def human_reviewer(edge_nodes, get_quit=False):
     logger = logging.getLogger('lca')
@@ -42,14 +36,6 @@ def human_reviewer(edge_nodes, get_quit=False):
     logger.info(f'Reviews  {reviews} ')
     return reviews
     # return reviews, quit_lca
-
-
-def verifier_alg(edge_nodes):
-    logger = logging.getLogger('lca')
-    scores = [get_score(n0, n1) for n0, n1 in edge_nodes]
-    logger.info(f'Scores  {scores} ')
-    return scores
-
 
 def save_probs_to_db(pos, neg, output_path, method='miewid'):
     dir_name = os.path.dirname(output_path)
@@ -68,117 +54,35 @@ def save_probs_to_db(pos, neg, output_path, method='miewid'):
         json.dump(data, f, indent=2)
 
     return data
-
-
-
-def get_new_edges(input_path):
-    with open(input_path, 'r') as f:
-        data = json.load(f)
-        
-        result = []
-        
-        for row in data:
-            annot_ids = sorted([row[0], row[1]])
-            result.append([annot_ids[0], annot_ids[1], row[2] / 100])
-        
-        # df = pd.DataFrame(result, columns=["annot_id_1", "annot_id_2", "weight", "aug_method"])
-        
-        return result
     
-
-def get_new_reviews(input_path):
-    with open(input_path, 'r') as f:
-        data = json.load(f)
-        
-        result = []
-        
-        for row in data:
-            result.append([row[0], row[1], row[3]])
-        
-        # df = pd.DataFrame(result, columns=["annot_id_1", "annot_id_2", "weight", "aug_method"])
-        
-        return result
+   
     
-
-def generate_ga_params(config_ini):
-    
-    ga_params = dict()
-
-    phc = float(config_ini['EDGE_WEIGHTS']['prob_human_correct'])
-    assert 0 < phc < 1
-    ga_params['prob_human_correct'] = phc
-    s = config_ini['EDGE_WEIGHTS']['augmentation_names']
-    ga_params['aug_names'] = s.strip().split()
-
-    mult = float(config_ini['ITERATIONS']['min_delta_converge_multiplier'])
-    ga_params['min_delta_converge_multiplier'] = mult
-
-    s = float(config_ini['ITERATIONS']['min_delta_stability_ratio'])
-    assert s > 1
-    ga_params['min_delta_stability_ratio'] = s
-
-    n = int(config_ini['ITERATIONS']['num_per_augmentation'])
-    assert n >= 1
-    ga_params['num_per_augmentation'] = n
-
-    n = int(config_ini['ITERATIONS']['tries_before_edge_done'])
-    assert n >= 1
-    ga_params['tries_before_edge_done'] = n
-
-    i = int(config_ini['ITERATIONS']['ga_iterations_before_return'])
-    assert i >= 1
-    ga_params['ga_iterations_before_return'] = i
-
-    mw = int(config_ini['ITERATIONS']['ga_max_num_waiting'])
-    assert mw >= 1
-    ga_params['ga_max_num_waiting'] = mw
-
-    ga_params['should_densify'] = config_ini['ITERATIONS'].getboolean(
-        'should_densify', False
-    )
-
-    n = int(config_ini['ITERATIONS'].get('densify_min_edges', 1))
-    assert n >= 1
-    ga_params['densify_min_edges'] = n
-
-    df = float(config_ini['ITERATIONS'].get('densify_frac', 0.0))
-    assert 0 <= df <= 1
-    ga_params['densify_frac'] = df
-
-    log_level = config_ini['LOGGING']['log_level']
-    ga_params['log_level'] = log_level
-    log_file = config_ini['LOGGING']['log_file']
-    ga_params['log_file'] = log_file
-
-    ga_params['draw_iterations'] = config_ini['DRAWING'].getboolean('draw_iterations')
-    ga_params['drawing_prefix'] = config_ini['DRAWING']['drawing_prefix']
-
-    logger = logging.getLogger('lca')
-    handler = logging.FileHandler(log_file, mode='w')
-    handler.setLevel(log_level)
-    handler.setFormatter(get_formatter())
-    logger.addHandler(handler)
-
-    return ga_params
-    
-
-#add new edges to db
-# def simulate(input_path, db_file, clustering_file):
-#     db_object = db_interface_generic(db_file, clustering_file)
-#     df_new_edges = get_new_edges(input_path)
-#     # 
-#     curate
-
+#init paths
 
 input_path = "lca/tmp/zebra_gt.json"
-input_path_additional = "lca/tmp/zebra_gt_add.json"
 edge_db_file = "lca/tmp/db/quads.json"
 clustering_file = "lca/tmp/db/clustering.json"
 lca_config_file = "/home/kate/code/lca/lca/tmp/config.ini"
+embedding_file = "/home/kate/code/lca/lca/tmp/zebra_embeddings.pickle"
+
+
+#create verification algorithm
 
 current_clustering = {}
 
 verifier_name = "miewid"
+
+
+embeddings, labels, uuids = load_pickle(embedding_file)
+ids = [i for i,_ in enumerate(uuids)]
+miewid_embeddings = MiewID_Embeddings(embeddings, ids)
+verifier_edges = miewid_embeddings.get_edges()
+
+def verifier_alg(edge_nodes):
+    logger = logging.getLogger('lca')
+    scores = [miewid_embeddings.get_score(n0, n1) for n0, n1 in edge_nodes]
+    logger.info(f'Scores  {scores} ')
+    return scores
 
 
 
@@ -187,7 +91,6 @@ num_pos_needed = 50
 num_neg_needed = 50
 verifier_file =  "lca/tmp/db/verifiers_probs.json"
 
-verifier_edges = get_new_edges(input_path)
 
 pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
 
@@ -197,15 +100,15 @@ config_ini = configparser.ConfigParser()
 config_ini.read(lca_config_file )
 lca_config = generate_ga_params(config_ini)
 
-verifier_results = get_new_edges(input_path)
-# human_reviews = get_new_reviews(input_path)
+
+
+#curate LCA
+
 human_reviews = []
-
-
 
 lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, current_clustering, lca_config)
 
-clusters = lca_object.curate(verifier_results, human_reviews)
+clusters = lca_object.curate(verifier_edges, human_reviews)
 
 cluster_data = {}
 
@@ -216,6 +119,5 @@ for cluster in clusters[0]:
         # print(k, vals)
         cluster_data[k] = list(vals)
     
-with open(clustering_file, 'w') as f:
-    json.dump(cluster_data, f)
+save_json(cluster_data, clustering_file)
 
