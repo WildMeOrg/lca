@@ -39,7 +39,7 @@ class MiewID_Embeddings(object):
                     pair = tuple(sorted((id1, another_id)))
                     if pair not in added_pairs:
                         added_pairs.add(pair)
-                        result.append([id1, another_id, 1-distance])
+                        result.append([pair[0], pair[1], 1-distance])
         return result
 
 
