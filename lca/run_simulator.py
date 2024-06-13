@@ -9,6 +9,8 @@ import configparser
 from init_logger import init_logger, get_formatter
 from tools import *
 from meiwid_embeddings import MiewID_Embeddings
+from cluster_validator import ClusterValidator
+import ga_driver
 
 init_logger()
 
@@ -59,7 +61,6 @@ def save_probs_to_db(pos, neg, output_path, method='miewid'):
     
 #init paths
 
-input_path = "lca/tmp/zebra_gt.json"
 edge_db_file = "lca/tmp/db/quads.json"
 clustering_file = "lca/tmp/db/clustering.json"
 lca_config_file = "/home/kate/code/lca/lca/tmp/config.ini"
@@ -99,6 +100,15 @@ wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
 config_ini = configparser.ConfigParser()
 config_ini.read(lca_config_file )
 lca_config = generate_ga_params(config_ini)
+
+
+# create cluster validator
+
+gt_clustering, gt_node2cid = generate_gt_clusters(gt_path)
+
+cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
+
+ga_driver.set_validator_functions(cluster_validator.trace_start_human, cluster_validator.trace_iter_compare_to_gt)
 
 
 

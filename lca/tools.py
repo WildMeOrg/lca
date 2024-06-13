@@ -1,6 +1,7 @@
 import pickle
 import json
 import logging
+import cluster_tools as ct
 from init_logger import init_logger, get_formatter
 
 init_logger()
@@ -75,3 +76,30 @@ def generate_ga_params(config_ini):
     logger.addHandler(handler)
 
     return ga_params
+
+def generate_gt_clusters(gt_path):
+        with open(gt_path, 'r') as f:
+            data = json.load(f)
+        gt_clustering = {}
+        gt_node2cid = {}
+        cids = ct.cids_from_range(len(data), prefix='ct')
+        for i, row in enumerate(data):
+            cid = cids[i]
+            gt_clustering[cid] = list()
+
+
+            gt_clustering[cid].append(row[0])
+            gt_node2cid[row[0]] = cid
+
+            gt_clustering[cid].append(row[1])
+            gt_node2cid[row[1]] = cid
+
+            
+
+        # Change the list to a set
+        gt_clustering = {
+            cid: set(sorted(cluster)) for cid, cluster in gt_clustering.items()
+        }
+
+        return gt_clustering, gt_node2cid
+    

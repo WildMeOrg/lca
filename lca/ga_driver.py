@@ -175,6 +175,11 @@ def params_and_weighters(config_ini, verifier_gt):
     return ga_params, wgtrs
 
 
+def set_validator_functions(trace_start_human_f, trace_iter_compare_to_gt_f):
+        ga_driver.trace_start_human = trace_start_human_f
+        ga_driver.trace_iter_compare_to_gt = trace_iter_compare_to_gt_f
+
+
 def generate_weighters(ga_params, verifier_gt):
     wgtrs = []
     for aug in ga_params['aug_names']:
@@ -207,6 +212,10 @@ def generate_weighters(ga_params, verifier_gt):
 
 
 class ga_driver(object):  # NOQA
+
+    trace_start_human = None
+    trace_iter_compare_to_gt = None
+
     def __init__(
         self,
         verifier_results,
@@ -308,6 +317,8 @@ class ga_driver(object):  # NOQA
             else:
                 self.direct_cids.add(cid0)
 
+
+
     def find_indirect_cid_pairs(self):
         for cid in self.direct_cids:
             if self.is_temp(cid):
@@ -386,6 +397,8 @@ class ga_driver(object):  # NOQA
         gai.set_log_contents_cbs(...)  #
         """
         gai.set_progress_cb(progress_cb)
+        if ga_driver.trace_start_human is not None and ga_driver.trace_iter_compare_to_gt is not None:
+            gai.set_trace_compare_to_gt_cb(ga_driver.trace_start_human, ga_driver.trace_iter_compare_to_gt)
 
         """
         This runs the main loop 10 iterations at a time in a while
