@@ -1,0 +1,15 @@
+exp_name: default_experiment
+comment: Experiment comment goes here
+data:
+  images_dir: 'images'
+  viewpoint_list: ['right', 'left']
+  name_keys: ['name', 'viewpoint']
+  n_filter_min: 2
+  n_filter_max: 10
+  annotation_file: test.json
+  embedding_file: embeddings.pickle
+
+lca:
+  verifier_name: 'miewid'
+  config_file: tmp/config.ini
+  db_path: db

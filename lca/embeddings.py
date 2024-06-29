@@ -2,7 +2,7 @@ import numpy as np
 from numpy.linalg import norm 
 
 
-class MiewID_Embeddings(object):
+class Embeddings(object):
     def __init__(self,
                  embeddings,
                  ids):

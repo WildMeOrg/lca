@@ -8,7 +8,7 @@ import os
 import configparser
 from init_logger import init_logger, get_formatter
 from tools import *
-from meiwid_embeddings import MiewID_Embeddings
+from embeddings import Embeddings
 from cluster_validator import ClusterValidator
 import ga_driver
 
@@ -76,7 +76,7 @@ verifier_name = "miewid"
 
 embeddings, labels, uuids = load_pickle(embedding_file)
 ids = [i for i,_ in enumerate(uuids)]
-miewid_embeddings = MiewID_Embeddings(embeddings, ids)
+miewid_embeddings = Embeddings(embeddings, ids)
 verifier_edges = miewid_embeddings.get_edges()
 
 def verifier_alg(edge_nodes):
@@ -129,5 +129,5 @@ for cluster in clusters[0]:
         # print(k, vals)
         cluster_data[k] = list(vals)
     
-save_json(cluster_data, clustering_file)
+write_json(cluster_data, clustering_file)
 

@@ -18,4 +18,4 @@ data/configs/config_*.yaml
 data/run_preprocess_*
 wbia_lca.orig
 
-lca/tmp/db
+lca/tmp/*

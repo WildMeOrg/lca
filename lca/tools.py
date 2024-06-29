@@ -1,4 +1,5 @@
 import pickle
+import yaml
 import json
 import logging
 import cluster_tools as ct
@@ -7,14 +8,39 @@ from init_logger import init_logger, get_formatter
 init_logger()
 
 
+
+def load_yaml(file_path):
+    print(f"Loading config from path: {file_path}")
+    with open(file_path, 'r') as file:
+        config_dict = yaml.safe_load(file)
+
+    return config_dict
+
+
+
+def get_config(file_path):
+
+    config_dict = load_yaml(file_path)
+
+    return config_dict
+
+def load_json(file_path):
+    with open(file_path) as f:
+        data = json.load(f)
+    return data
+
+def write_json(data, out_path):
+    json_object = json.dumps(data, indent=4)
+    with open(out_path, "w") as outfile:
+        outfile.write(json_object)
+        
+
+
 def load_pickle(file):
     with open(file, 'rb') as f_file:
         result = pickle.load(f_file)
     return result
 
-def save_json(data, filename):
-    with open(filename, 'w') as outfile:
-        json.dump(data, outfile, indent=4)
 
 def generate_ga_params(config_ini):
     
@@ -77,29 +103,36 @@ def generate_ga_params(config_ini):
 
     return ga_params
 
-def generate_gt_clusters(gt_path):
-        with open(gt_path, 'r') as f:
-            data = json.load(f)
-        gt_clustering = {}
-        gt_node2cid = {}
-        cids = ct.cids_from_range(len(data), prefix='ct')
-        for i, row in enumerate(data):
-            cid = cids[i]
-            gt_clustering[cid] = list()
+def generate_gt_clusters(df, name_key):
+    gt_node2cid = {}
+    cids_unique = df[name_key].unique()
+    cids = [f'ct{idx}' for idx in range(len(cids_unique))]
+    gt_clustering = {cid: [] for cid in cids}
+    
+    for i, row in df.iterrows():
+        cid = cids[list(cids_unique).index(row[name_key])]
+        gt_clustering[cid].append(i)
+        gt_node2cid[i] = cid
+
+    gt_clustering = {
+        cid: set(cluster) for cid, cluster in gt_clustering.items()
+    }
+
+    return gt_clustering, gt_node2cid
 
 
-            gt_clustering[cid].append(row[0])
-            gt_node2cid[row[0]] = cid
+def print_intersect_stats(df,individual_key="name"):
+    print("** cross-set stats **")
+    print()
+    print(' - Counts: ')
+    names = df[individual_key].unique()
+    
+    
+    print("     number of individuals: ", len(names))
+    print("     number of annotations in train: ", len(df))
+    print()
+    avg_ratio_train = len(df) / len(names)
+    print(f"    average number of annotations per individual: {avg_ratio_train:.2f}")
+    print()
 
-            gt_clustering[cid].append(row[1])
-            gt_node2cid[row[1]] = cid
-
-            
-
-        # Change the list to a set
-        gt_clustering = {
-            cid: set(sorted(cluster)) for cid, cluster in gt_clustering.items()
-        }
-
-        return gt_clustering, gt_node2cid
     
