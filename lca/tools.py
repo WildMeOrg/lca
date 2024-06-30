@@ -3,14 +3,14 @@ import yaml
 import json
 import logging
 import cluster_tools as ct
-from init_logger import init_logger, get_formatter
+from init_logger import get_formatter
 
-init_logger()
 
 
 
 def load_yaml(file_path):
-    print(f"Loading config from path: {file_path}")
+    logger = logging.getLogger('lca')
+    logger.info(f"Loading config from path: {file_path}")
     with open(file_path, 'r') as file:
         config_dict = yaml.safe_load(file)
 
@@ -42,58 +42,62 @@ def load_pickle(file):
     return result
 
 
-def generate_ga_params(config_ini):
+def generate_ga_params(config_yaml):
     
     ga_params = dict()
 
-    phc = float(config_ini['EDGE_WEIGHTS']['prob_human_correct'])
+    phc = float(config_yaml['edge_weights']['prob_human_correct'])
     assert 0 < phc < 1
     ga_params['prob_human_correct'] = phc
-    s = config_ini['EDGE_WEIGHTS']['augmentation_names']
+    s = config_yaml['edge_weights']['augmentation_names']
     ga_params['aug_names'] = s.strip().split()
 
-    mult = float(config_ini['ITERATIONS']['min_delta_converge_multiplier'])
+    ga_params['num_pos_needed'] = config_yaml['edge_weights']['num_pos_needed']
+    ga_params['num_neg_needed'] = config_yaml['edge_weights']['num_neg_needed']
+
+
+    mult = float(config_yaml['iterations']['min_delta_converge_multiplier'])
     ga_params['min_delta_converge_multiplier'] = mult
 
-    s = float(config_ini['ITERATIONS']['min_delta_stability_ratio'])
+    s = float(config_yaml['iterations']['min_delta_stability_ratio'])
     assert s > 1
     ga_params['min_delta_stability_ratio'] = s
 
-    n = int(config_ini['ITERATIONS']['num_per_augmentation'])
+    n = int(config_yaml['iterations']['num_per_augmentation'])
     assert n >= 1
     ga_params['num_per_augmentation'] = n
 
-    n = int(config_ini['ITERATIONS']['tries_before_edge_done'])
+    n = int(config_yaml['iterations']['tries_before_edge_done'])
     assert n >= 1
     ga_params['tries_before_edge_done'] = n
 
-    i = int(config_ini['ITERATIONS']['ga_iterations_before_return'])
+    i = int(config_yaml['iterations']['ga_iterations_before_return'])
     assert i >= 1
     ga_params['ga_iterations_before_return'] = i
 
-    mw = int(config_ini['ITERATIONS']['ga_max_num_waiting'])
+    mw = int(config_yaml['iterations']['ga_max_num_waiting'])
     assert mw >= 1
     ga_params['ga_max_num_waiting'] = mw
 
-    ga_params['should_densify'] = config_ini['ITERATIONS'].getboolean(
-        'should_densify', False
-    )
+    should_densify_str = str(config_yaml['iterations'].get('should_densify', False)).lower()
+    ga_params['should_densify'] = should_densify_str == 'true'
 
-    n = int(config_ini['ITERATIONS'].get('densify_min_edges', 1))
+    n = int(config_yaml['iterations'].get('densify_min_edges', 1))
     assert n >= 1
     ga_params['densify_min_edges'] = n
 
-    df = float(config_ini['ITERATIONS'].get('densify_frac', 0.0))
+    df = float(config_yaml['iterations'].get('densify_frac', 0.0))
     assert 0 <= df <= 1
     ga_params['densify_frac'] = df
 
-    log_level = config_ini['LOGGING']['log_level']
+    log_level = config_yaml['logging']['log_level']
     ga_params['log_level'] = log_level
-    log_file = config_ini['LOGGING']['log_file']
+    log_file = config_yaml['logging']['log_file']
     ga_params['log_file'] = log_file
 
-    ga_params['draw_iterations'] = config_ini['DRAWING'].getboolean('draw_iterations')
-    ga_params['drawing_prefix'] = config_ini['DRAWING']['drawing_prefix']
+    draw_iterations_str = str(config_yaml['drawing'].get('draw_iterations', False)).lower()
+    ga_params['draw_iterations'] = draw_iterations_str == 'true'
+    ga_params['drawing_prefix'] = config_yaml['drawing']['drawing_prefix']
 
     logger = logging.getLogger('lca')
     handler = logging.FileHandler(log_file, mode='w')
@@ -122,17 +126,15 @@ def generate_gt_clusters(df, name_key):
 
 
 def print_intersect_stats(df,individual_key="name"):
-    print("** cross-set stats **")
-    print()
-    print(' - Counts: ')
+    logger = logging.getLogger('lca')
+    logger.info(f"** Dataset statistcs **")
+    logger.info(f' - Counts: ')
     names = df[individual_key].unique()
     
     
-    print("     number of individuals: ", len(names))
-    print("     number of annotations in train: ", len(df))
-    print()
-    avg_ratio_train = len(df) / len(names)
-    print(f"    average number of annotations per individual: {avg_ratio_train:.2f}")
-    print()
+    logger.info(f" ---- number of individuals: {len(names)}" )
+    logger.info(f" ---- number of annotations: {len(df)}")
+    avg_ratio = len(df) / len(names)
+    logger.info(f" ---- average number of annotations per individual: {avg_ratio:.2f}")
 
     

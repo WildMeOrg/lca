@@ -11,5 +11,27 @@ data:
 
 lca:
   verifier_name: 'miewid'
-  config_file: tmp/config.ini
-  db_path: db
+  db_path: tmp/zebra_db
+
+  edge_weights:
+    prob_human_correct: 0.98
+    augmentation_names: miewid human
+    num_pos_needed: 50
+    num_neg_needed: 50
+
+
+  iterations:
+    min_delta_converge_multiplier: 0.95
+    min_delta_stability_ratio: 8
+    num_per_augmentation: 2
+    tries_before_edge_done: 4
+    ga_iterations_before_return: 10
+    ga_max_num_waiting: 50
+
+  logging:
+    log_level: INFO
+    log_file: tmp/zebra.log
+
+  drawing:
+    draw_iterations: False
+    drawing_prefix: drawing_lca
