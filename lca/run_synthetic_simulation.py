@@ -8,7 +8,7 @@ import cluster_tools as ct
 
 import exp_scores as es
 import graph_algorithm as ga
-import simulator as sim
+import synthetic_simulation as sim
 import weighter as wgtr
 
 

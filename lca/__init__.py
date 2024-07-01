@@ -4,7 +4,7 @@ from init_logger import init_logger
 init_logger()
 
 try:
-    from lca._version import __version__
+    from _version import __version__
 except ImportError:
     __version__ = '0.0.0'
 
@@ -22,9 +22,9 @@ import cluster_tools  # NOQA
 import compare_clusterings  # NOQA
 import db_interface  # NOQA
 import db_interface_sim  # NOQA
-import lca.draw_lca as draw_lca  # NOQA
+import draw_lca as draw_lca  # NOQA
 import edge_generator  # NOQA
-import lca.edge_generator_sim as edge_generator_sim  # NOQA
+import edge_generator_sim as edge_generator_sim  # NOQA
 import exp_scores  # NOQA
 import ga_driver  # NOQA
 import graph_algorithm  # NOQA
@@ -34,8 +34,8 @@ import lca_alg2  # NOQA
 import lca_heap  # NOQA
 import lca_queues  # NOQA
 import example_driver  # NOQA
-import run_from_simulator as run_from_simulator  # NOQA
-import simulator  # NOQA
+import run_synthetic_simulation as run_synthetic_simulation  # NOQA
+import synthetic_simulation as synthetic_simulation  # NOQA
 import test_cluster_tools  # NOQA
 import test_graph_algorithm  # NOQA
 import weight_manager  # NOQA
