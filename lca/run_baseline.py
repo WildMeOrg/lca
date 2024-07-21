@@ -135,13 +135,13 @@ def run(config):
     current_clustering={}
     cluster_data = {}
     verifier_name = lca_config['verifier_name']
-
+    thrs = [0.35, 0.4, 0.45, 0.5]
     # verifier_alg = call_verifier_alg(verifier_embeddings)
-    
-    clustering, node2cid, num_human = baseline_clustering(list(gt_node2cid.keys()), verifier_edges, human_reviewer, 0.1)
-    logger = logging.getLogger('lca')
-
-    cluster_validator.incremental_stats(num_human, clustering, node2cid, gt_clustering, gt_node2cid)
+    for thr in thrs:
+        clustering, node2cid, num_human = baseline_clustering(list(gt_node2cid.keys()), verifier_edges, human_reviewer, thr)
+    # logger = logging.getLogger('lca')
+        print(f" Threshold: {thr}")
+        cluster_validator.incremental_stats(num_human, clustering, node2cid, gt_clustering, gt_node2cid)
 
 
 
