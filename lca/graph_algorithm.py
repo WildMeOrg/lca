@@ -404,7 +404,7 @@ class graph_algorithm(object):  # NOQA
                 self.new_lcas(self.clustering.keys(), use_pairs=False, use_singles=True)
                 self.queues.info_long(max_entries=10)
                 if self.trace_start_human_gt_cb is not None:
-                    self.trace_start_human_gt_cb(self.clustering, self.node2cid)
+                    self.trace_start_human_gt_cb(self.clustering, self.node2cid, self.G)
 
             # Step 2c: consider shift from splitting to stability
             elif self.phase == 'splitting' and (
@@ -483,7 +483,7 @@ class graph_algorithm(object):  # NOQA
             num_human = self.weight_mgr.num_human_decisions()
             if self.trace_iter_compare_to_gt_cb is not None:
                 self.trace_iter_compare_to_gt_cb(
-                    self.clustering, self.node2cid, num_human
+                    self.clustering, self.node2cid, num_human, self.G
                 )
 
             if (
