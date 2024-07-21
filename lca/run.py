@@ -78,7 +78,7 @@ def run(config):
     os.makedirs(db_path, exist_ok=True)
 
     verifier_file =  os.path.join(db_path, "verifiers_probs.json")
-    edge_db_file =  os.path.join(db_path, "quads.json")
+    edge_db_file =  os.path.join(db_path, "quads.csv")
     clustering_file = os.path.join(db_path, "clustering.json")
 
 

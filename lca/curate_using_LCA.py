@@ -3,6 +3,7 @@ import edge_generator
 import ga_driver
 import os
 import json
+import csv
 import pandas as pd
 import random
 import logging
@@ -20,9 +21,8 @@ def create_file(path):
     
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
-    data = []
-    with open(path, 'w') as f:
-        json.dump(data, f)
+    with open(path, 'w', newline='') as f:
+        writer = csv.writer(f)
 
     return path
 
@@ -32,53 +32,26 @@ def create_file(path):
 class db_interface_generic(db_interface.db_interface):
     def __init__(self, db_file, clustering):
         self.db_file = db_file if os.path.exists(db_file) else create_file(db_file)
-        # self.clustering_file = clustering_file if os.path.exists(clustering_file) else create_file(clustering_file)
-
-
+        quads = []
         with open(self.db_file, 'r') as f:
-            lines = f.read().split('\n')
-        lines = [line.strip().split() for line in lines]
-        print('lines ', lines)
-        if len(lines) > 1:
-            quads = [
-                (int(n0), int(n1), int(wgt), aug_name)    # need to make this more general -- UUIDs for example
-                for n0, n1, wgt, aug_name in lines
-            ]
-        else: 
-            quads = []
+            reader = csv.reader(f)
+            for row in reader:
+                n0, n1, weight, method = int(row[0]), int(row[1]), int(row[2]), row[3]
+                quads.append([n0, n1, weight, method])
 
         # Output stats to the logger
         super(db_interface_generic, self).__init__(quads, clustering, are_edges_new=False)
 
-        # quads_columns = ["annot_id_1", "annot_id_2", "weight", "aug_method"]
-        # df_quads = pd.read_json(self.db_file)
-        # if df_quads.empty:
-        #     df_quads = pd.DataFrame(columns=quads_columns)
-        # else:
-        #     df_quads.columns = quads_columns
-
-
-
-        # clustering_columns = ["annot_id", "cluster"]
-        # df_clustering = pd.read_json(clustering_file)
-        # if df_clustering.empty:
-        #     df_clustering = pd.DataFrame(columns=clustering_columns)
-        # else:
-        #     df_clustering.columns = ["annot_id", "cluster"]
 
         # Output stats to the logger
         super(db_interface_generic, self).__init__(quads, clustering, are_edges_new=False)
 
     def add_edges_db(self, quads):
-        with open(self.db_file, 'r') as f:
-            existing_data = json.load(f)
 
-        new_data = quads
-
-        existing_data.extend(new_data)
-
-        with open(self.db_file, 'w') as f:
-            json.dump(existing_data, f, indent=4)
+        with open(self.db_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(quads)
+       
 
         # The following was for recording attributes in the NetworkX graph.
         # It does not appear to be needed
@@ -91,21 +64,6 @@ class db_interface_generic(db_interface.db_interface):
             else:
                 attrib[aug_name] = w
 
-    # def add_clusters_db(self, quads):
-    #     with open(self.clustering_file, 'r') as f:
-    #         existing_data = json.load(f)
-
-    #     existing_annots = {row['annot_id'] for row in existing_data}
-    #     index = max((row['cluster'] for row in existing_data), default=-1) + 1
-
-    #     new_annot_ids = {quad["annot_id_1"] for _, quad in quads.iterrows() if quad["annot_id_1"] not in existing_annots} | \
-    #                     {quad["annot_id_2"] for _, quad in quads.iterrows() if quad["annot_id_2"] not in existing_annots}
-
-    #     new_data = [{"annot_id": annot_id, "cluster": i} for i, annot_id in enumerate(new_annot_ids, start=index)]
-    #     existing_data.extend(new_data)
-
-    #     with open(self.clustering_file, 'w') as f:
-    #         json.dump(existing_data, f, indent=2)
 
         
     
