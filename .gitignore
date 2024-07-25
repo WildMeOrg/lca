@@ -19,3 +19,5 @@ data/run_preprocess_*
 wbia_lca.orig
 
 lca/tmp/*
+
+ui/*

@@ -1,0 +1,44 @@
+exp_name: default_experiment         # Name of the experiment
+comment: Experiment comment goes here 
+
+data:
+  images_dir: 'images'               # Directory where images are stored, not in use right now but will be necessary for human verifier later
+  viewpoint_list: ['right', 'left']  # List of viewpoints; annotation with other viewpoints will be excluded
+  name_keys: ['name', 'viewpoint']   
+  # List of keys that construct an individual ID. 
+  #For example, if 'name_keys' are set to ['name', 'viewpoint'], 
+  #all annotations where 'name' and 'viewpoint' are the same 
+  #will be considered as belonging to the same class.
+  
+  n_filter_min: 2                    # Minimum number of annotations per class
+  n_filter_max: 10                   # Maximum number of annotations per class
+  annotation_file: test.json         # json annotation file
+  embedding_file: embeddings.pickle  
+  # File containing embeddings, will be read as 
+  #embeddings, uuids = load_pickle(data_params['embedding_file'])
+
+lca:
+  verifier_name: 'miewid'            # Name of the verifier algorithm
+  db_path: tmp/zebra_db              # Path to the database where rrsults are stored
+
+  edge_weights:                      # weight calibration params
+    prob_human_correct: 0.98         # Probability that a human verification is correct, needed for human review simulation
+    augmentation_names: miewid human # Names of augmentations to be used
+    num_pos_needed: 50               # Number of positive samples needed
+    num_neg_needed: 50               # Number of negative samples needed
+
+  iterations:                         #lca params
+    min_delta_converge_multiplier: 0.95 
+    min_delta_stability_ratio: 8         
+    num_per_augmentation: 2              
+    tries_before_edge_done: 4            
+    ga_iterations_before_return: 10      
+    ga_max_num_waiting: 50               
+
+  logging:
+    log_level: INFO                     # Level of logging (e.g., DEBUG, INFO, WARNING)
+    log_file: tmp/zebra.log             # File where logs will be saved
+
+  drawing:
+    draw_iterations: False              
+    drawing_prefix: drawing_lca         

@@ -27,6 +27,40 @@ Documentation
 At the moment (11-21) the documentation is scattered throughout the code, and, of course, some of it is out of date.
 But, a good starting point for how to use it is in curate_using_lca.py.  More to come soon.
 
+
+How to run
+-------------
+
+1. 1. Install all requirements:
+ install -r requirements.txt
+
+
+2. Prepare the configuration file according to the example in `configs/config_default.yaml`.
+Important details about the configuration file:
+- You need a JSON file with annotations.
+- You need an `embeddings.pickle` file containing embeddings from the re-identification method output for each annotation.
+
+Detailed documentation can be found in `configs/config_default.yaml`.
+
+
+4. While LCA is running, you can follow its progress in the `log_file` specified in the config file. Search for `Incremental_stats` to see the accuracy metrics.
+
+5. When LCA is finished, you can find 3 files saved under `db_path`/`exp_name`:
+
+- `quads.csv`: Database file where each quad is of the form (n0, n1, w, aug_name). Here, n0 and n1 are the nodes, w is the signed weight, and aug_name is the augmentation method (a verification algorithm or a human annotator/reviewer) that produced the edge.
+
+- `verifiers_probs.json`: Dictionary containing verification scores/probabilities and associated human decisions. The keys of the dictionary are the verification (augmentation) algorithm names, and the values are dictionaries of probabilities for pairs marked positive (same animal) and negative. Note that the relative proportion of positive and negative scores can matter. This is entirely used for the weighting calibration.
+  
+  ```
+  ALGO_AUG_NAME: {
+      'gt_positive_probs': new_pos_probs,
+      'gt_negative_probs': new_neg_probs,
+  }
+  ```
+
+- `clustering.json`: The resulting clustering, represented as a mapping from cluster ID to a list (or set) of annotation/node IDs.
+
+
 Task list
 ---------
 
