@@ -40,7 +40,7 @@ How to run
 2. Prepare the configuration file according to the example in `configs/config_default.yaml`.
 Important details about the configuration file:
 
-* You need a JSON file with annotations.
+* You need a JSON file with annotations. The annotations should contain ground truth information. 'name_keys' in configuration file should be setup to specify how the ground truth are constructed.  
 * You need an `embeddings.pickle` file containing embeddings from the re-identification method output for each annotation.
 
 Detailed documentation can be found in `configs/config_default.yaml`.
@@ -70,7 +70,7 @@ Detailed documentation can be found in `configs/config_default.yaml`.
   }
   
 
-- `clustering.json`: The resulting clustering, represented as a mapping from cluster ID to a list (or set) of annotation/node IDs.
+- `clustering.json`: The changes to the clustering the method started with, represented as a mapping from cluster ID to a list (or set) of annotation/node IDs.
 
 
 Task list
