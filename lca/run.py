@@ -42,8 +42,8 @@ def save_probs_to_db(pos, neg, output_path, method='miewid'):
     
     data = {
         method: {
-            "gt_positive_probs": [p for _, _, p in pos],
-            "gt_negative_probs": [p for _, _, p in neg]
+            "gt_positive_probs": [p.item() for _, _, p in pos],
+            "gt_negative_probs": [p.item() for _, _, p in neg]
         }
     }
     
