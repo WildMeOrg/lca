@@ -12,6 +12,7 @@ class edge_generator(object):  # NOQA
     def __init__(self, db, wgtr):
         self.db = db
         self.wgtr = wgtr
+        self.quit = False
 
         self.edge_requests = []  # triples (n0, n1, aug_name)
         self.edge_results = []  # quads (n0, n1, w, aug_name)
@@ -61,7 +62,7 @@ class edge_generator(object):  # NOQA
             else:
                 quads_remaining.append(quad)
         self.edge_results = quads_remaining
-        return quads_to_return
+        return quads_to_return, self.quit
 
     def remove_nodes_cb(self, node_set):
         """

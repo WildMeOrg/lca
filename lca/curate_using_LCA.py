@@ -7,6 +7,8 @@ import csv
 import pandas as pd
 import random
 import logging
+from tools import *
+from ga_driver import IterationHalt
 
 
 """
@@ -149,7 +151,8 @@ class edge_generator_generic(edge_generator.edge_generator):  # NOQA
         # Set the human review requests to be sent to the web interface.
         self.set_edge_requests(human_review_requests)
 
-    def ingest_human_reviews(self, review_triples):
+    def ingest_human_reviews(self, review_triples, quit=False):
+        self.quit = quit
         new_edge_results = self.new_edges_from_human(review_triples)
         self.edge_results += new_edge_results
         requests_to_keep = {
@@ -239,9 +242,9 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
     quit_lca = False
     while i < len(edge_nodes):
         j = min(i + num_in_batch, len(edge_nodes))
-        reviews, quit_lca = human_reviewer(edge_nodes[i: j], get_quit=True)
-        if quit_lca:
-            break
+        reviews, quit_lca = human_reviewer(edge_nodes[i: j])
+        # if quit_lca:
+        #     break
         for n0, n1, b in reviews:
             e = (n0, n1, edge_scores[(n0, n1)])
             if b:
@@ -396,6 +399,7 @@ class curate_using_LCA(object):
         )
 
         cluster_changes = []
+        save_clusters = []
         while True:
             try:
                 #  Run the next step. This step stops when LCA is completely done,
@@ -409,8 +413,11 @@ class curate_using_LCA(object):
                 next_cluster_changes = next(ga_gen)
             except StopIteration:
                 break
-
-            if next_cluster_changes is None:
+            
+            if type(next_cluster_changes) is IterationHalt:
+                clustering = {key: list(val) for key, val in next_cluster_changes.clustering.items()}
+                save_clusters.append(clustering)
+            elif next_cluster_changes is None:
                 #  (b) If the change_to_review is None we are in the middle of LCA
                 #  applied to a single CCPIC and more human reviews are needed. These
                 #  review requests will have been previously communicated to the edge
@@ -421,13 +428,21 @@ class curate_using_LCA(object):
                 logger.info(f'Received {len(requested_edges)} human review requests')
 
                 #  Need to add the ability to stop the computation here....
-                review_triples = self.human_reviewer(requested_edges)
-                self.edge_gen.ingest_human_reviews(review_triples)
+                review_triples, quit = self.human_reviewer(requested_edges)
+                
+                self.edge_gen.ingest_human_reviews(review_triples, quit)
             else:
                 #  4c. The third case for the end of an iteration (a yield from
                 #      run_all_ccPICs) is the completion of a single ccPIC. In this
                 #      case the cluster changes from the ccPIC are return for review
                 #      and commitment.
                 cluster_changes.append(next_cluster_changes)
-
+        if save_clusters:
+            logger.info(f'Saving {len(save_clusters)} clusterings')
+            clustering_file = self.lca_config['cluster_ids_to_check']    
+            write_json(save_clusters, clustering_file)
         return cluster_changes
+
+
+
+

@@ -59,6 +59,8 @@ class weight_manager(object):  # NOQA
         self.counts = [0] * self.num_names
         self.node_set = set()
 
+        self.quit = False
+
     def _name_to_index(self, name):
         """
         Find the index of the augmentation name in the list. It is an
@@ -140,7 +142,8 @@ class weight_manager(object):  # NOQA
         Note, this should be able to handle edges that it has not
         requested and handle nodes that do not yet exist.
         """
-        new_results = self.result_cb(self.node_set)
+        new_results, quit = self.result_cb(self.node_set)
+        self.quit = quit
         for (n0, n1, new_wgt, a_name) in new_results:
             if n0 > n1:
                 n0, n1 = n1, n0

@@ -21,14 +21,12 @@ def get_review(node_1, node_2, df, name_key, rate=0.98):
     return is_similar if random.random() < rate else not is_similar
 
 def call_get_reviews(df, name_key):
-    def get_reviews(edge_nodes, get_quit=False):
+    def get_reviews(edge_nodes):
         logger = logging.getLogger('lca')
         reviews = [(n0, n1, get_review(n0, n1, df, name_key)) for n0, n1 in edge_nodes]
-        quit_lca = False
-        if get_quit:
-            return reviews, quit_lca
-        logger.info(f'Reviews  {reviews} ')
-        return reviews
+        quit_lca = random.random() < 0.4
+        # quit_lca = False
+        return reviews, quit_lca
     return get_reviews
     # return reviews, quit_lca
 
@@ -80,6 +78,9 @@ def run(config):
     verifier_file =  os.path.join(db_path, "verifiers_probs.json")
     edge_db_file =  os.path.join(db_path, "quads.csv")
     clustering_file = os.path.join(db_path, "clustering.json")
+    clustering_pause_file = os.path.join(db_path, "cluster_ids_to_check.json")
+
+    lca_params['cluster_ids_to_check'] = clustering_pause_file
 
 
     # preprocess data
@@ -141,12 +142,12 @@ def run(config):
 
 
     # save clustering results
-
-    for cluster in clusters[0]:
-        for k, vals in cluster.new_clustering.items():
-            cluster_data[k] = list(vals)
-        
-    write_json(cluster_data, clustering_file)
+    if len(clusters) > 0:
+        for cluster in clusters[0]:
+            for k, vals in cluster.new_clustering.items():
+                cluster_data[k] = list(vals)
+            
+        write_json(cluster_data, clustering_file)
 
 
 def parse_args():

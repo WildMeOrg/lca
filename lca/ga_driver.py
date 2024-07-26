@@ -13,6 +13,7 @@ import graph_algorithm as ga
 import weighter
 from init_logger import get_formatter
 
+
    
 
 
@@ -409,14 +410,17 @@ class ga_driver(object):  # NOQA
         iter_num = 0
         converged = False
         paused = False
-        while not converged:
+        halt_requested = False
+        while not converged and not halt_requested:
             num_iter_to_run = 10
-            paused, iter_num, converged = gai.run_main_loop(
+            paused, iter_num, converged, halt_requested = gai.run_main_loop(
                 iter_num, iter_num + num_iter_to_run
             )
             if yield_on_paused and paused:
                 yield None
 
+        if halt_requested:
+            yield IterationHalt(gai.clustering)
         """
         Compute and then return the final information - the changes to
         the clusters.
@@ -454,7 +458,7 @@ class ga_driver(object):  # NOQA
                     changes = next(ga_gen)
                 except StopIteration:
                     break
-                if changes is None:
+                if (changes is None) or (type(changes) is IterationHalt):
                     yield changes
                 else:
                     break
@@ -624,3 +628,12 @@ def test_ga_driver():
 
 # if __name__ == '__main__':
 #     test_ga_driver()
+class IterationHalt(object):  
+
+
+    def __init__(
+        self,
+        clustering
+    ):
+        
+        self.clustering = clustering

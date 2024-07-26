@@ -354,7 +354,7 @@ class graph_algorithm(object):  # NOQA
         logger.info('Created %d new LCAs' % num_created)
 
     def run_main_loop(self, iter_num=0, max_iterations=None):
-        halt_requested = False
+        halt_requested = self.weight_mgr.quit
         should_pause = False
         converged = False
 
@@ -506,8 +506,7 @@ class graph_algorithm(object):  # NOQA
                 converged,
             )
         )
-
-        return (should_pause, iter_num, converged)
+        return (should_pause, iter_num, converged, halt_requested)
 
     def apply_lca(self, a):
         """
