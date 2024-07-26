@@ -2,7 +2,12 @@
 LCA - Local Clustering and Alternatives
 =======================================
 
-Reference implementation of the LCA algorithm - still a work in progress, but accelerating :D
+Reference implementation of the LCA algorithm - still a work in progress, but accelerating :D  
+
+This implementation currently emphasizes experimental evaluation of the capabilities of the LCA algorithm itself.
+As such it simulates a human reviewer from the "ground truth" names (in the form of clusters).
+Soon we will add an interface for a real human reviewer and the resulting intelligent interactive clustering.
+This will allow LCA to be used to correct errors in animal id databases and ultimataely for daily id curation.
 
 
 Requirements
@@ -24,7 +29,7 @@ If you use this code or its models in your research, please cite:
 Documentation
 -------------
 
-At the moment (11-21) the documentation is scattered throughout the code, and, of course, some of it is out of date.
+Currently, yhe documentation is scattered throughout the code, and, of course, some of it is out of date.
 But, a good starting point for how to use it is in curate_using_lca.py.  More to come soon.
 
 
