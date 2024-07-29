@@ -383,6 +383,7 @@ class ga_driver(object):  # NOQA
             self.ga_params,
             self.edge_gen.edge_request_cb,
             self.edge_gen.edge_result_cb,
+            self.edge_gen.save_active_clusters_cb
         )
 
         """

@@ -80,7 +80,7 @@ class ClusterValidator(object):
         r_clustering, r_node2cid = self.create_reachable(G)
         info_text = 'Reachable stats'
         result = self.incremental_stats(
-            num_human, clustering, node2cid, r_clustering, r_node2cid, info_text
+            num_human, r_clustering, r_node2cid, self.gt_clustering, self.gt_node2cid, info_text
         )
         self.r_results.append(result)
         self.prev_num_human = num_human

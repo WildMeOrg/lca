@@ -31,6 +31,8 @@ def create_file(path):
 
 
 
+
+
 class db_interface_generic(db_interface.db_interface):
     def __init__(self, db_file, clustering):
         self.db_file = db_file if os.path.exists(db_file) else create_file(db_file)
@@ -361,6 +363,12 @@ class curate_using_LCA(object):
 
         # 4. Create the edge generators
         self.edge_gen = edge_generator_generic(self.db, self.wgtr, self.verifier_alg, self.verifier_name)
+    
+    def save_active_clusters(self, active_clusters):
+        logger = logging.getLogger('lca')
+        logger.info(f'Saving {len(active_clusters.keys())} ccPICs')
+        clustering_file = self.lca_config['cluster_ids_to_check']    
+        write_json(active_clusters, clustering_file)
 
 
     def curate(self,
@@ -399,7 +407,7 @@ class curate_using_LCA(object):
         )
 
         cluster_changes = []
-        save_clusters = []
+    
         while True:
             try:
                 #  Run the next step. This step stops when LCA is completely done,
@@ -414,10 +422,8 @@ class curate_using_LCA(object):
             except StopIteration:
                 break
             
-            if type(next_cluster_changes) is IterationHalt:
-                clustering = {key: list(val) for key, val in next_cluster_changes.clustering.items()}
-                save_clusters.append(clustering)
-            elif next_cluster_changes is None:
+            
+            if next_cluster_changes is None:
                 #  (b) If the change_to_review is None we are in the middle of LCA
                 #  applied to a single CCPIC and more human reviews are needed. These
                 #  review requests will have been previously communicated to the edge
@@ -426,6 +432,10 @@ class curate_using_LCA(object):
                 requested_edges = [(n0, n1) for n0, n1, _ in requested_edges]
 
                 logger.info(f'Received {len(requested_edges)} human review requests')
+
+                self.save_active_clusters(self.edge_gen.active_clusters)
+
+                # return cluster_changes
 
                 #  Need to add the ability to stop the computation here....
                 review_triples, quit = self.human_reviewer(requested_edges)
@@ -437,10 +447,7 @@ class curate_using_LCA(object):
                 #      case the cluster changes from the ccPIC are return for review
                 #      and commitment.
                 cluster_changes.append(next_cluster_changes)
-        if save_clusters:
-            logger.info(f'Saving {len(save_clusters)} clusterings')
-            clustering_file = self.lca_config['cluster_ids_to_check']    
-            write_json(save_clusters, clustering_file)
+        self.save_active_clusters(self.edge_gen.active_clusters)
         return cluster_changes
 
 

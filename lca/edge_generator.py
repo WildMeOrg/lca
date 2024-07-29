@@ -17,6 +17,7 @@ class edge_generator(object):  # NOQA
         self.edge_requests = []  # triples (n0, n1, aug_name)
         self.edge_results = []  # quads (n0, n1, w, aug_name)
         self.nodes_to_remove = []
+        self.active_clusters = {}
 
     def wgt_from_verifier(self, p, vn):
         if vn == 'zero':
@@ -63,6 +64,13 @@ class edge_generator(object):  # NOQA
                 quads_remaining.append(quad)
         self.edge_results = quads_remaining
         return quads_to_return, self.quit
+    
+    def save_active_clusters_cb(self, ccpic_id, clustering):
+        """
+        Extract the edges (quads) from the results that are part of the weight list.
+        """
+        self.active_clusters[ccpic_id] = clustering
+        return 
 
     def remove_nodes_cb(self, node_set):
         """

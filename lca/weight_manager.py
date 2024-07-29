@@ -41,7 +41,7 @@ def empty_gen(n):
 
 
 class weight_manager(object):  # NOQA
-    def __init__(self, aug_names, tries_before_edge_done, request_cb, result_cb):
+    def __init__(self, aug_names, tries_before_edge_done, request_cb, result_cb, save_active_clusters_cb):
         """
         Initialize with a single request callback, a single result
         callback and the names of the augmentation methods. This list
@@ -52,6 +52,7 @@ class weight_manager(object):  # NOQA
         self.tries_before_done = tries_before_edge_done
         self.request_cb = request_cb
         self.result_cb = result_cb
+        self.save_active_clusters_cb = save_active_clusters_cb
         assert self.aug_names[-1] == 'human'
         self.num_names = len(self.aug_names)
         self.augment_count = collections.defaultdict(empty_gen(self.num_names))
@@ -131,6 +132,7 @@ class weight_manager(object):  # NOQA
         logger.info('Request edges: %s' % str(req_list))
         self.request_cb(req_list)
 
+        
     def get_weight_changes(self):
         """
         Return the results of the augmentation methods in the form of

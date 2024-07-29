@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import datetime as dt
 import networkx as nx
+import uuid
 
 import cid_to_lca
 import cluster_tools as ct
@@ -181,13 +182,13 @@ Invariants:
 
 
 class graph_algorithm(object):  # NOQA
-    def __init__(self, edges, clusters, aug_names, params, aug_request_cb, aug_result_cb):
+    def __init__(self, edges, clusters, aug_names, params, aug_request_cb, aug_result_cb, save_active_clusters_cb):
         self.params = params
         logger.info('======================================')
         logger.info('Construction of graph_algorithm object')
         logger.info(dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         self.weight_mgr = wm.weight_manager(
-            aug_names, params['tries_before_edge_done'], aug_request_cb, aug_result_cb
+            aug_names, params['tries_before_edge_done'], aug_request_cb, aug_result_cb, save_active_clusters_cb
         )
         self.G = nx.Graph()
         weighted_edges = self.weight_mgr.get_initial_edges(edges)
@@ -220,6 +221,7 @@ class graph_algorithm(object):  # NOQA
         )
 
         self.draw_obj = None
+        self.ccpic_id = str(uuid.uuid4())
         if self.params['draw_iterations']:
             self.draw_obj = draw_lca.draw_lca(self.params['drawing_prefix'])
 
@@ -237,6 +239,9 @@ class graph_algorithm(object):  # NOQA
         self.trace_iter_compare_to_gt_cb = None
         self.should_stop_cb = None
         self.progress_cb = None
+
+        self.weight_mgr.save_active_clusters_cb(self.ccpic_id, self.clustering)
+
         logger.info('Completed graph algorithm initialization')
 
     def set_remove_nodes_cb(self, cb):
@@ -354,7 +359,7 @@ class graph_algorithm(object):  # NOQA
         logger.info('Created %d new LCAs' % num_created)
 
     def run_main_loop(self, iter_num=0, max_iterations=None):
-        halt_requested = self.weight_mgr.quit
+        halt_requested = False
         should_pause = False
         converged = False
 
@@ -363,8 +368,8 @@ class graph_algorithm(object):  # NOQA
         ):
             iter_num += 1
             logger.info('')
-            logger.info('*** Iteration %d ***' % iter_num)
-
+            logger.info('*** ccPIC id is %s, Iteration %d***' % (self.ccpic_id, iter_num))
+            
             if self.progress_cb is not None:
                 self.progress_cb(self, iter_num)
 
@@ -424,13 +429,13 @@ class graph_algorithm(object):  # NOQA
                 a is not None
                 and self.params['min_delta_score_converge'] < a.delta_score()
             ):
-                logger.info('Decision: augment graph from top LCA')
+                logger.info(f'ccPIC id is {self.ccpic_id}, Decision: augment graph from top LCA')
                 self.queues.pop_Q()
                 prs = a.get_inconsistent(
                     self.params['num_per_augmentation'], self.weight_mgr.futile_tester
                 )
                 if len(prs) == 0:
-                    logger.info("LCA marked as 'futile'. Moved to futile list.")
+                    logger.info(f"ccPIC id is {self.ccpic_id},LCA marked as 'futile'. Moved to futile list.")
                     self.queues.add_to_futile(a)
                 else:
                     self.weight_mgr.request_new_weights(prs)
@@ -440,7 +445,7 @@ class graph_algorithm(object):  # NOQA
             # are waiting for edges, so need to pause.
             elif self.queues.num_on_W() > 0:
                 should_pause = True
-                logger.info(
+                logger.info(f'ccPIC id is {self.ccpic_id},'
                     'Decision: top LCA delta is too low, but non-empty'
                     '  waiting queue, so need to pause'
                 )
@@ -449,9 +454,7 @@ class graph_algorithm(object):  # NOQA
             # LCAs are waiting for edges. The last possibility is to
             # densify the singleton LCAs. This is done at most once.
             elif self.should_run_densify:
-                logger.info(
-                    'Decision: top LCA delta is too low and empty waiting queue;'
-                    ' will densify singletons'
+                logger.info(f'ccPIC id is {self.ccpic_id}, Decision: top LCA delta is too low and empty waiting queue; will densify singletons'
                 )
                 self.densify_singletons()
                 self.should_run_densify = False
@@ -460,8 +463,7 @@ class graph_algorithm(object):  # NOQA
             # if there are none then the algorithm has converged!
             else:
                 assert self.queues.num_on_W() == 0
-                logger.info(
-                    'Decision: all deltas too low and empty waiting queue, so done'
+                logger.info(f'ccPIC id is {self.ccpic_id}, Decision: all deltas too low and empty waiting queue, so done'
                 )
                 converged = True
 
@@ -498,7 +500,12 @@ class graph_algorithm(object):  # NOQA
         if self.progress_cb is not None:
             self.progress_cb(self, iter_num)
 
-        logger.info(
+        if converged:
+            self.weight_mgr.save_active_clusters_cb(self.ccpic_id, {})
+        else:
+            self.weight_mgr.save_active_clusters_cb(self.ccpic_id, self.clustering)
+
+        logger.info(f'ccPIC id is {self.ccpic_id},'
             '*** Iteration %d Status Update - paused: %s, converged %s'
             % (
                 iter_num,
@@ -564,7 +571,7 @@ class graph_algorithm(object):  # NOQA
         new_cid_pairs = []
         for e in self.weight_mgr.get_weight_changes():
             if e[0] in self.removed_nodes or e[1] in self.removed_nodes:
-                logger.info('Rejected edge %s because node was removed' % str(e))
+                logger.info(f'ccPIC id is {self.ccpic_id}, Rejected edge {str(e)} because node was removed' )
                 continue
 
             logger.info('Inserting edge %s' % str(e))
@@ -576,7 +583,7 @@ class graph_algorithm(object):  # NOQA
                     self.node2cid[node] = new_cid
                     self.clustering[new_cid] = set([node])
                     num_new_nodes += 1
-                    logger.info('New node %a, created new cid %a' % (node, new_cid))
+                    logger.info(f'ccPIC id is {self.ccpic_id}, New node {node}, created new cid {new_cid}')
 
             cids = self.cids_for_edge(e)
             lcas_to_change = self.cid2lca.containing_all_cids(cids)
@@ -622,7 +629,7 @@ class graph_algorithm(object):  # NOQA
             if old_node not in self.G.nodes:
                 continue
 
-            logger.info('Removing node %a' % old_node)
+            logger.info(f'ccPIC id is {self.ccpic_id}, Removing node {old_node}' )
 
             self.removed_nodes.add(old_node)
             num_removed += 1
@@ -652,7 +659,7 @@ class graph_algorithm(object):  # NOQA
             # nothing more to do.
             if len(old_cluster) == 0:
                 del self.clustering[old_cid]
-                logger.info("Removed node's cluster is now empty; no new LCAs")
+                logger.info(f"ccPIC id is {self.ccpic_id}, Removed node's cluster is now empty; no new LCAs")
                 continue
 
             # Form the new clusters and replace the old one in the clustering
@@ -723,10 +730,7 @@ class graph_algorithm(object):  # NOQA
         nl = self.queues.num_lcas()
         wait = nw > self.params['ga_max_num_waiting']
         if wait:
-            logger.info(
-                'Decide to await for new edges: num waiting LCAs is %d out of %d'
-                % (nw, nl)
-            )
+            logger.info(f'ccPIC id is {self.ccpic_id}, Decide to await for new edges: num waiting LCAs is {nw} out of {nl}')
         return wait
 
     def stop_request_check(self):
@@ -767,14 +771,9 @@ class graph_algorithm(object):  # NOQA
                 a.pprint_short(initial_str=initial_str, stop_after_from=False)
 
     def show_brief_state(self):
-        logger.info(
-            'LCAs %d, clusters %d, new edges: %s'
-            % (
-                self.queues.num_lcas(),
-                len(self.clustering),
-                self.weight_mgr.edge_counts(),
-            )
-        )
+        logger.info(f"ccPIC id is {self.ccpic_id}, LCAs {self.queues.num_lcas()}, clusters {len(self.clustering)}, new edges: {self.weight_mgr.edge_counts()} ")
+            
+        
 
         logger.info(
             'Queue lengths: main Q %d, scoring %d, waiting %d'

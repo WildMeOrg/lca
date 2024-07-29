@@ -29,8 +29,17 @@ def load_json(file_path):
         data = json.load(f)
     return data
 
+
+class SetEncoder(json.JSONEncoder):
+
+    def default(self, obj):
+        if isinstance(obj, set):
+            return list(obj)
+        else:
+            return json.JSONEncoder.default(self, obj)
+
 def write_json(data, out_path):
-    json_object = json.dumps(data, indent=4)
+    json_object = json.dumps(data, indent=4, cls=SetEncoder)
     with open(out_path, "w") as outfile:
         outfile.write(json_object)
         
