@@ -67,7 +67,7 @@ class edge_generator(object):  # NOQA
     
     def save_active_clusters_cb(self, ccpic_id, clustering):
         """
-        Extract the edges (quads) from the results that are part of the weight list.
+        Save active clusters
         """
         self.active_clusters[ccpic_id] = clustering
         return 

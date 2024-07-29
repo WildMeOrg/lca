@@ -438,7 +438,7 @@ class curate_using_LCA(object):
 
                 # clustering = apply_changes(next_cluster_changes.cluster_changes, self.db.clustering)
                 
-                self.save_active_clusters(self.edge_gen.active_clusters, cluster_changes, next_cluster_changes.cluster_changes)
+                self.save_active_clusters(self.edge_gen.active_clusters, cluster_changes, {})
 
                 return cluster_changes
 
