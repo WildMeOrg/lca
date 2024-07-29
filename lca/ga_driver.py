@@ -418,7 +418,14 @@ class ga_driver(object):  # NOQA
                 iter_num, iter_num + num_iter_to_run
             )
             if yield_on_paused and paused:
-                yield None
+                ccPIC_n2c = ct.build_node_to_cluster_mapping(ccPIC_clustering)
+                changes = compare_clusterings.find_changes(
+                    ccPIC_clustering,
+                    ccPIC_n2c,
+                    gai.clustering,
+                    gai.node2cid,
+                )
+                yield IterationPause(changes)
 
         if halt_requested:
             yield IterationHalt(gai.clustering)
@@ -447,7 +454,7 @@ class ga_driver(object):  # NOQA
             )
 
         logger.info('')
-        yield changes
+        yield IterationConverged(changes)
 
     def run_all_ccPICs(self, **kwargs):
         changes_to_review = []
@@ -459,7 +466,7 @@ class ga_driver(object):  # NOQA
                     changes = next(ga_gen)
                 except StopIteration:
                     break
-                if (changes is None) or (type(changes) is IterationHalt):
+                if (type(changes) is IterationPause) or (type(changes) is IterationHalt):
                     yield changes
                 else:
                     break
@@ -638,3 +645,23 @@ class IterationHalt(object):
     ):
         
         self.clustering = clustering
+
+class IterationConverged(object):  
+
+
+    def __init__(
+        self,
+        cluster_changes
+    ):
+        
+        self.cluster_changes = cluster_changes
+
+class IterationPause(object):  
+
+
+    def __init__(
+        self,
+        cluster_changes
+    ):
+        
+        self.cluster_changes = cluster_changes

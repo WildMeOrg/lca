@@ -78,9 +78,9 @@ def run(config):
     verifier_file =  os.path.join(db_path, "verifiers_probs.json")
     edge_db_file =  os.path.join(db_path, "quads.csv")
     clustering_file = os.path.join(db_path, "clustering.json")
-    clustering_pause_file = os.path.join(db_path, "cluster_ids_to_check.json")
+    autosave_file = os.path.join(db_path, "autosave.json")
 
-    lca_params['cluster_ids_to_check'] = clustering_pause_file
+    lca_params['autosave_file'] = autosave_file
 
 
     # preprocess data
