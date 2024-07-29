@@ -21,3 +21,7 @@ wbia_lca.orig
 lca/tmp/*
 
 ui/*
+
+lca/configs/*
+
+!lca/configs/config_default.yaml
