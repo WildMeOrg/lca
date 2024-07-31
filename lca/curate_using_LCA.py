@@ -440,7 +440,7 @@ class curate_using_LCA(object):
                 
                 self.save_active_clusters(self.edge_gen.active_clusters, cluster_changes, {})
 
-                return cluster_changes
+                # return cluster_changes
 
                 #  Need to add the ability to stop the computation here....
                 review_triples, quit = self.human_reviewer(requested_edges)
@@ -452,7 +452,8 @@ class curate_using_LCA(object):
                 #      case the cluster changes from the ccPIC are return for review
                 #      and commitment.
                 cluster_changes.append(next_cluster_changes.cluster_changes)
-        self.save_active_clusters(self.edge_gen.active_clusters, cluster_changes, self.db.clustering)
+        # self.save_active_clusters(self.edge_gen.active_clusters, cluster_changes, self.db.clustering)
+        self.save_active_clusters(self.edge_gen.active_clusters, {}, {})
         return cluster_changes
 
 

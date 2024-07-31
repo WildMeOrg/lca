@@ -33,7 +33,7 @@ def baseline_clustering(all_nodes, verifier_edges, human_reviewer, threshold):
         elif s > low_threshold:
             for_review.append((n1,n2))
     num_human = len(for_review)
-    reviews = human_reviewer(for_review)
+    reviews, quit = human_reviewer(for_review)
     for (n1, n2, s) in reviews:
         if s:
             connect_nodes(n1, n2)

@@ -3,6 +3,7 @@ import cluster_tools as ct
 import json
 import networkx as nx
 import logging
+import os
 
 logger = logging.getLogger('lca')
 
@@ -15,13 +16,15 @@ class ClusterValidator(object):
         self.gt_node2cid = gt_node2cid
         self.prev_num_human = 0
 
+        
+
 
         """
         Generate the "reachable" ground truth, the obtainable
         result given simulated failures to match that could disconnect
         a correct match.
         """
-
+    
 
     def create_reachable(self, G):
         r_clustering = {}
@@ -99,6 +102,7 @@ class ClusterValidator(object):
             'frac correct': frac,
             'precision': prec,
             'recall': rec,
+            'error_rate': 1- frac
         }
 
         logger.info(f'{info_text}: {json.dumps(result, indent=4)}')

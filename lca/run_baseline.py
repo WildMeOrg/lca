@@ -13,27 +13,6 @@ from init_logger import init_logger
 import argparse
 
 
-def get_review(node_1, node_2, df, name_key, rate=0.98):
-
-    is_similar = False
-    if df.iloc[node_1][name_key] == df.iloc[node_2][name_key]:
-        is_similar=True
-    
-    return is_similar if random.random() < rate else not is_similar
-
-def call_get_reviews(df, name_key):
-    def get_reviews(edge_nodes, get_quit=False):
-        logger = logging.getLogger('lca')
-        reviews = [(n0, n1, get_review(n0, n1, df, name_key)) for n0, n1 in edge_nodes]
-        quit_lca = False
-        if get_quit:
-            return reviews, quit_lca
-        logger.info(f'Reviews  {reviews} ')
-        return reviews
-    return get_reviews
-    # return reviews, quit_lca
-
-
 
 def save_probs_to_db(pos, neg, output_path, method='miewid'):
     dir_name = os.path.dirname(output_path)
@@ -114,8 +93,9 @@ def run(config):
 
     num_pos_needed = lca_params['num_pos_needed']
     num_neg_needed = lca_params['num_neg_needed']
+    prob_human_correct = lca_params['prob_human_correct']
     
-    human_reviewer = call_get_reviews(df, filter_key)
+    human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
 
     pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
     wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
@@ -132,6 +112,7 @@ def run(config):
     # run baseline
 
     human_reviews = []
+    results = []
     current_clustering={}
     cluster_data = {}
     verifier_name = lca_config['verifier_name']
@@ -141,9 +122,12 @@ def run(config):
         clustering, node2cid, num_human = baseline_clustering(list(gt_node2cid.keys()), verifier_edges, human_reviewer, thr)
     # logger = logging.getLogger('lca')
         print(f" Threshold: {thr}")
-        cluster_validator.incremental_stats(num_human, clustering, node2cid, gt_clustering, gt_node2cid)
+        result = cluster_validator.incremental_stats(num_human, clustering, node2cid, gt_clustering, gt_node2cid)
+        results.append(result)
 
+    return results
 
+    # write_json(results, data_params['stats_file'])
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Load configuration file.")

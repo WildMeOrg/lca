@@ -1,6 +1,7 @@
 import pickle
 import yaml
 import json
+import random
 import logging
 import cluster_tools as ct
 from init_logger import get_formatter
@@ -23,6 +24,25 @@ def get_config(file_path):
     config_dict = load_yaml(file_path)
 
     return config_dict
+
+
+def get_review(node_1, node_2, df, name_key, rate=0.98):
+
+    is_similar = False
+    if df.iloc[node_1][name_key] == df.iloc[node_2][name_key]:
+        is_similar=True
+    
+    return is_similar if random.random() < rate else not is_similar
+
+def call_get_reviews(df, name_key, rate):
+    def get_reviews(edge_nodes, rate=rate):
+        logger = logging.getLogger('lca')
+        reviews = [(n0, n1, get_review(n0, n1, df, name_key, rate)) for n0, n1 in edge_nodes]
+        quit_lca = random.random() < 0.4
+        # quit_lca = False
+        return reviews, quit_lca
+    return get_reviews
+    # return reviews, quit_lca
 
 def load_json(file_path):
     with open(file_path) as f:
