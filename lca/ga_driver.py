@@ -248,6 +248,7 @@ class ga_driver(object):  # NOQA
         self.edge_quads += self.edge_gen.new_edges_from_human(human_decisions)
         logger.info('Formed incoming graph edge quads to initiate LCA:')
 
+
         quad_dict = {}
         for q in self.edge_quads:
             n1, n2, w, algo = q
@@ -280,6 +281,7 @@ class ga_driver(object):  # NOQA
         self.temp_cids = set()
         self.temp_node_to_cid = dict()
         self.temp_cid_to_node = dict()
+        self.active_clusters = set()
         self.direct_cids = set(cluster_ids_to_check)
         self.cid_pairs = set()
         self.find_direct_cids_and_pairs()
@@ -382,10 +384,9 @@ class ga_driver(object):  # NOQA
             self.ga_params['aug_names'],
             self.ga_params,
             self.edge_gen.edge_request_cb,
-            self.edge_gen.edge_result_cb,
-            self.edge_gen.save_active_clusters_cb
+            self.edge_gen.edge_result_cb
         )
-
+        self.active_clusters.update(gai.clustering.keys())
         """
         Add call backs for removing nodes, pausing, getting intermediate
         results, and getting the status.
@@ -428,7 +429,7 @@ class ga_driver(object):  # NOQA
                 yield IterationPause(changes)
 
         if halt_requested:
-            yield IterationHalt(gai.clustering)
+            yield IterationHalt()
         """
         Compute and then return the final information - the changes to
         the clusters.
@@ -440,7 +441,7 @@ class ga_driver(object):  # NOQA
             gai.clustering,
             gai.node2cid,
         )
-
+        
         logger.info('')
         logger.info('*********************************')
         logger.info('After LCA convergence on ccPIC, here are the cluster changes:')
@@ -452,7 +453,7 @@ class ga_driver(object):  # NOQA
             compare_clusterings.compare_to_other_clustering(
                 gai.clustering, gai.node2cid, other_clustering, gai.G
             )
-
+        self.active_clusters.difference_update(gai.clustering.keys())
         logger.info('')
         yield IterationConverged(changes)
 
@@ -663,5 +664,5 @@ class IterationPause(object):
         self,
         cluster_changes
     ):
-        
         self.cluster_changes = cluster_changes
+        pass

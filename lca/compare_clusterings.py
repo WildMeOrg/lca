@@ -125,6 +125,17 @@ class clustering_change(object):  # NOQA
         logger.info('removed_nodes %s' % (self.removed_nodes,))
         logger.info('change_type %s' % (self.change_type,))
 
+    def __str__(self):
+        s = ('old_clustering %s, ' % (self.old_clustering,))
+        s +=('new_clustering %s, ' % (self.new_clustering,))
+        s +=('query_nodes %s, ' % (self.query_nodes,))
+        s +=('removed_nodes %s, ' % (self.removed_nodes,))
+        s +=('change_type %s' % (self.change_type,))
+        return s
+
+    def __repr__(self):
+        return str(self)
+
     def serialize(self):
         data = {
             'old_clustering': self.old_clustering,

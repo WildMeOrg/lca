@@ -174,7 +174,7 @@ class db_interface(object):  # NOQA
         if len(self.clustering[cid]) == 0:
             del self.clustering[cid]
 
-    def commit_cluster_change(self, cc):
+    def commit_cluster_change(self, cc, temporary=False):
         """
         Commit the changes according to the type of change.  See
         compare_clusterings.py  Nothing is done here if there is
@@ -182,13 +182,14 @@ class db_interface(object):  # NOQA
         main WBIA database.
         """
         if cc.change_type != 'Unchanged':
+            clustering = self.latest_clustering if temporary else self.clustering
             # 1. Add new clusters
-            self.clustering.update(cc.new_clustering)
+            clustering.update(cc.new_clustering)
 
             # 2. Remove old clusters
             removed_cids = set(cc.old_clustering.keys()) - set(cc.new_clustering.keys())
             for old_c in removed_cids:
-                del self.clustering[old_c]
+                del clustering[old_c]
 
             # 3. Update the node to clusterid mapping
             new_node_to_cid = ct.build_node_to_cluster_mapping(cc.new_clustering)
@@ -199,7 +200,14 @@ class db_interface(object):  # NOQA
             for n in cc.removed_nodes:
                 assert n not in self.node_to_cid
 
-        return self.commit_cluster_change_db(cc)
+        # return self.commit_cluster_change_db(cc)
+        return None
+    
+    def commit_cluster_changes(self, changes, temporary=False):
+        if temporary:
+            self.latest_clustering = self.clustering.copy()
+        return [self.commit_cluster_change(change, temporary) for change in changes]
+
 
     def add_edges_db(self, quads):
         raise NotImplementedError()

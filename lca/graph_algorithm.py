@@ -182,13 +182,13 @@ Invariants:
 
 
 class graph_algorithm(object):  # NOQA
-    def __init__(self, edges, clusters, aug_names, params, aug_request_cb, aug_result_cb, save_active_clusters_cb):
+    def __init__(self, edges, clusters, aug_names, params, aug_request_cb, aug_result_cb):
         self.params = params
         logger.info('======================================')
         logger.info('Construction of graph_algorithm object')
         logger.info(dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         self.weight_mgr = wm.weight_manager(
-            aug_names, params['tries_before_edge_done'], aug_request_cb, aug_result_cb, save_active_clusters_cb
+            aug_names, params['tries_before_edge_done'], aug_request_cb, aug_result_cb
         )
         self.G = nx.Graph()
         weighted_edges = self.weight_mgr.get_initial_edges(edges)
@@ -239,8 +239,6 @@ class graph_algorithm(object):  # NOQA
         self.trace_iter_compare_to_gt_cb = None
         self.should_stop_cb = None
         self.progress_cb = None
-
-        self.weight_mgr.save_active_clusters_cb(self.ccpic_id, self.clustering)
 
         logger.info('Completed graph algorithm initialization')
 
@@ -499,11 +497,6 @@ class graph_algorithm(object):  # NOQA
 
         if self.progress_cb is not None:
             self.progress_cb(self, iter_num)
-
-        if converged:
-            self.weight_mgr.save_active_clusters_cb(self.ccpic_id, {})
-        else:
-            self.weight_mgr.save_active_clusters_cb(self.ccpic_id, self.clustering)
 
         logger.info(f'ccPIC id is {self.ccpic_id},'
             '*** Iteration %d Status Update - paused: %s, converged %s'

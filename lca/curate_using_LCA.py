@@ -362,11 +362,10 @@ class curate_using_LCA(object):
         # 4. Create the edge generators
         self.edge_gen = edge_generator_generic(self.db, self.wgtr, self.verifier_alg, self.verifier_name)
     
-    def save_active_clusters(self, active_clusters, cluster_changes, clustering):
+    def save_active_clusters(self, active_clusters, clustering):
         autosave_file = self.lca_config['autosave_file']  
         output =  {
-            'cluster_ids_to_check': [cluster for clusters in active_clusters.values() for cluster in clusters.keys()],
-            'current_changes': cluster_changes,
+            'cluster_ids_to_check': active_clusters,
             'clustering': clustering
 
         } 
@@ -436,11 +435,12 @@ class curate_using_LCA(object):
                 logger.info(f'Received {len(requested_edges)} human review requests')
 
 
-                # clustering = apply_changes(next_cluster_changes.cluster_changes, self.db.clustering)
                 
-                self.save_active_clusters(self.edge_gen.active_clusters, cluster_changes, {})
+                self.db.commit_cluster_changes(next_cluster_changes.cluster_changes, temporary=True)
+                logger.info(f'Cluster changes {next_cluster_changes.cluster_changes}')
+                self.save_active_clusters(driver.active_clusters, self.db.latest_clustering)
 
-                # return cluster_changes
+                return cluster_changes
 
                 #  Need to add the ability to stop the computation here....
                 review_triples, quit = self.human_reviewer(requested_edges)
@@ -452,8 +452,7 @@ class curate_using_LCA(object):
                 #      case the cluster changes from the ccPIC are return for review
                 #      and commitment.
                 cluster_changes.append(next_cluster_changes.cluster_changes)
-        # self.save_active_clusters(self.edge_gen.active_clusters, cluster_changes, self.db.clustering)
-        self.save_active_clusters(self.edge_gen.active_clusters, {}, {})
+                self.db.commit_cluster_changes(next_cluster_changes.cluster_changes)
         return cluster_changes
 
 
