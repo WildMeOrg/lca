@@ -363,9 +363,9 @@ class curate_using_LCA(object):
         self.edge_gen = edge_generator_generic(self.db, self.wgtr, self.verifier_alg, self.verifier_name)
     
     def save_active_clusters(self, active_clusters, clustering):
-        autosave_file = self.lca_config['autosave_file']  
+        autosave_file = self.lca_config['autosave_file']
         output =  {
-            'cluster_ids_to_check': active_clusters,
+            'cluster_ids_to_check': set([cid for val in active_clusters.values() for cid in val ]),
             'clustering': clustering
 
         } 
@@ -440,7 +440,7 @@ class curate_using_LCA(object):
                 logger.info(f'Cluster changes {next_cluster_changes.cluster_changes}')
                 self.save_active_clusters(driver.active_clusters, self.db.latest_clustering)
 
-                return cluster_changes
+                # return cluster_changes
 
                 #  Need to add the ability to stop the computation here....
                 review_triples, quit = self.human_reviewer(requested_edges)

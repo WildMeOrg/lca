@@ -281,7 +281,7 @@ class ga_driver(object):  # NOQA
         self.temp_cids = set()
         self.temp_node_to_cid = dict()
         self.temp_cid_to_node = dict()
-        self.active_clusters = set()
+        self.active_clusters = dict()
         self.direct_cids = set(cluster_ids_to_check)
         self.cid_pairs = set()
         self.find_direct_cids_and_pairs()
@@ -386,7 +386,7 @@ class ga_driver(object):  # NOQA
             self.edge_gen.edge_request_cb,
             self.edge_gen.edge_result_cb
         )
-        self.active_clusters.update(gai.clustering.keys())
+        self.active_clusters[gai.ccpic_id] = gai.clustering.keys()
         """
         Add call backs for removing nodes, pausing, getting intermediate
         results, and getting the status.
@@ -426,6 +426,7 @@ class ga_driver(object):  # NOQA
                     gai.clustering,
                     gai.node2cid,
                 )
+                self.active_clusters[gai.ccpic_id] = gai.clustering.keys()
                 yield IterationPause(changes)
 
         if halt_requested:
@@ -453,7 +454,7 @@ class ga_driver(object):  # NOQA
             compare_clusterings.compare_to_other_clustering(
                 gai.clustering, gai.node2cid, other_clustering, gai.G
             )
-        self.active_clusters.difference_update(gai.clustering.keys())
+        del self.active_clusters[gai.ccpic_id]
         logger.info('')
         yield IterationConverged(changes)
 
