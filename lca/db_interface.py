@@ -42,6 +42,14 @@ class db_interface(object):  # NOQA
         underlying database.
         """
         self.edge_graph.add_edges_from([(n0, n1) for n0, n1, _, _ in quads])
+        for n0, n1, w, aug_name in quads:
+            attrib = self.edge_graph[n0][n1]
+            if aug_name == 'human':
+                if 'human' not in attrib:
+                    attrib['human'] = []
+                attrib['human'].append(w)
+            else:
+                attrib[aug_name] = w
 
         logger.info(f'Added {len(quads)} edges from quads')
         # num_components = len(list(nx.connected_components(self.edge_graph)))

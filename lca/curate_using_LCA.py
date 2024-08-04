@@ -36,6 +36,7 @@ def create_file(path):
 class db_interface_generic(db_interface.db_interface):
     def __init__(self, db_file, clustering):
         self.db_file = db_file if os.path.exists(db_file) else create_file(db_file)
+        
         quads = []
         with open(self.db_file, 'r') as f:
             reader = csv.reader(f)
@@ -53,18 +54,7 @@ class db_interface_generic(db_interface.db_interface):
         with open(self.db_file, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerows(quads)
-       
-
-        # The following was for recording attributes in the NetworkX graph.
-        # It does not appear to be needed
-        for n0, n1, w, aug_name in quads:
-            attrib = self.edge_graph[n0][n1]
-            if aug_name == 'human':
-                if 'human' not in attrib:
-                    attrib['human'] = []
-                attrib['human'].append(w)
-            else:
-                attrib[aug_name] = w
+        
 
 
         
@@ -440,7 +430,7 @@ class curate_using_LCA(object):
                 logger.info(f'Cluster changes {next_cluster_changes.cluster_changes}')
                 self.save_active_clusters(driver.active_clusters, self.db.latest_clustering)
 
-                # return cluster_changes
+                # return (cluster_changes, False)
 
                 #  Need to add the ability to stop the computation here....
                 review_triples, quit = self.human_reviewer(requested_edges)
@@ -453,7 +443,7 @@ class curate_using_LCA(object):
                 #      and commitment.
                 cluster_changes.append(next_cluster_changes.cluster_changes)
                 self.db.commit_cluster_changes(next_cluster_changes.cluster_changes)
-        return cluster_changes
+        return (cluster_changes, True)
 
 
 

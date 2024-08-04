@@ -5,8 +5,10 @@ from run_baseline import run as run_baseline
 from tools import *
 
 species = 'giraffe'
-x = 'prob_human_error'
-y='error_rate'
+x = 'num human'
+y='frac correct'
+# x = 'prob_human_error'
+# y='error_rate'
 config_path = 'configs/config_giraffe.yaml'
 
 
@@ -56,7 +58,7 @@ def plot_one(species, config_path, x, y):
     results_baseline = run_baseline(config)
     
 
-    plot(results_lca, results_baseline, x, y, f'tmp/plots/{species}_1.eps', xlabel="Number of human reviews", ylabel=y)
+    plot(results_lca, results_baseline, x, y, f'tmp/plots/{species}_1_{y}.eps', xlabel="Number of human reviews", ylabel='`%` of correct clusters')
 
 
 def plot_two(species, config_path, x, y):
@@ -80,5 +82,5 @@ def plot_two(species, config_path, x, y):
 
     plot(results_lca, results_baseline, x, y, f'tmp/plots/{species}_2.eps', xlabel="Probability of human review error", ylabel='Error rate')
 
-# plot_one(species, config_path, x, y)
-plot_two(species, config_path, x, y)
+plot_one(species, config_path, x, y)
+# plot_two(species, config_path, x, y)

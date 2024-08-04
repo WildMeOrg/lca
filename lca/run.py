@@ -90,17 +90,12 @@ def run(config):
     verifier_embeddings = Embeddings(embeddings, ids)
     verifier_edges = verifier_embeddings.get_edges()
 
+    # create human reviewer
 
-    # generate wgtr calibration    
-
-    num_pos_needed = lca_params['num_pos_needed']
-    num_neg_needed = lca_params['num_neg_needed']
     prob_human_correct = lca_params['prob_human_correct']
-    
+        
     human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
-
-    pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
-    wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
+    
 
     
 
@@ -117,21 +112,31 @@ def run(config):
     current_clustering={}
     cluster_data = {}
     verifier_name = lca_config['verifier_name']
-
     verifier_alg = call_verifier_alg(verifier_embeddings)
-    lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, current_clustering, lca_params)
-    clusters = lca_object.curate(verifier_edges, human_reviews)
 
+    if os.path.exists(autosave_file):
+        wgtrs_calib_dict = load_json(verifier_file)
+        autosave_object = load_json(autosave_file)
+        current_clustering = autosave_object['clustering']
+        cluster_ids_to_check = autosave_object['cluster_ids_to_check']
+        lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, current_clustering, lca_params)
+        cluster_changes, is_finished = lca_object.curate([], [], cluster_ids_to_check)
+    else:
+        # generate wgtr calibration    
 
-    # save clustering results
-    if len(clusters) > 0:
-        for cluster in clusters[0]:
-            for k, vals in cluster.new_clustering.items():
-                cluster_data[k] = list(vals)
-            
-        write_json(cluster_data, clustering_file)
+        num_pos_needed = lca_params['num_pos_needed']
+        num_neg_needed = lca_params['num_neg_needed']
+        
+
+        pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
+        wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
     
-    # write_json(cluster_validator.gt_results, data_params['stats_file'])
+        lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, current_clustering, lca_params)
+        cluster_changes, is_finished = lca_object.curate(verifier_edges, human_reviews)
+
+    write_json(lca_object.db.clustering, clustering_file)
+    if is_finished and os.path.exists(autosave_file):
+        os.remove(autosave_file)
 
     return cluster_validator.gt_results
 

@@ -57,6 +57,13 @@ class SetEncoder(json.JSONEncoder):
             return list(obj)
         else:
             return json.JSONEncoder.default(self, obj)
+        
+
+def load_json(path):
+    with open(path, "r") as file:
+        json_object = json.load(file)
+    return json_object
+
 
 def write_json(data, out_path):
     json_object = json.dumps(data, indent=4, cls=SetEncoder)
@@ -76,7 +83,7 @@ def generate_ga_params(config_yaml):
     ga_params = dict()
 
     phc = float(config_yaml['edge_weights']['prob_human_correct'])
-    assert 0 < phc < 1
+    assert 0 < phc <= 1
     ga_params['prob_human_correct'] = phc
     s = config_yaml['edge_weights']['augmentation_names']
     ga_params['aug_names'] = s.strip().split()
