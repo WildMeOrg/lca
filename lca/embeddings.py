@@ -5,15 +5,17 @@ from numpy.linalg import norm
 class Embeddings(object):
     def __init__(self,
                  embeddings,
-                 ids):
+                 ids,
+                 distance_power=1):
         self.embeddings = embeddings
         self.ids = ids
+        self.distance_power = distance_power
 
 
     def get_score(self, id1, id2):
         embedding1 = self.embeddings[self.ids.index(id1)]
         embedding2 = self.embeddings[self.ids.index(id2)]
-        return max(self.cosine_similarity(embedding1, embedding2), 0)
+        return max(self.cosine_similarity(embedding1, embedding2), 0)**self.distance_power
 
 
     def cosine_similarity(self, input1, input2):

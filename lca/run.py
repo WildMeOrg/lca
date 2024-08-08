@@ -90,7 +90,7 @@ def run(config):
 
     # create embeddings verifier
 
-    verifier_embeddings = Embeddings(embeddings, list(node2uuid.keys()))
+    verifier_embeddings = Embeddings(embeddings, list(node2uuid.keys()), distance_power=lca_params['distance_power'])
     verifier_edges = verifier_embeddings.get_edges()
 
     # create human reviewer
