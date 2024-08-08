@@ -207,8 +207,8 @@ class db_interface(object):  # NOQA
             #    db through the call to self.remove_nodes.
             for n in cc.removed_nodes:
                 assert n not in self.node_to_cid
-
-        return self.commit_cluster_change_db(cc.new_clustering)
+            
+        return clustering if temporary else self.commit_cluster_change_db(self.clustering)
     
     def commit_cluster_changes(self, changes, temporary=False):
         if temporary:

@@ -366,7 +366,7 @@ class curate_using_LCA(object):
         self.lca_config['min_delta_score_stability'] = stability
 
         # 3.
-        self.db = db_interface_generic(self.edge_db_file, self.clustering_file, current_clustering)
+        self.db = db_interface_generic(self.edge_db_file, self.clustering_file, self.current_clustering)
 
         # 4. Create the edge generators
         self.edge_gen = edge_generator_generic(self.db, self.wgtr, self.verifier_alg, self.verifier_name)
