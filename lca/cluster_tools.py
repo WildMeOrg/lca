@@ -2,6 +2,7 @@
 
 import logging
 import math
+from collections import defaultdict
 
 
 logger = logging.getLogger('lca')
@@ -359,6 +360,75 @@ def count_equal_clustering(from_clustering, to_clustering, to_n2c):
 
     return n
 
+def get_nonequal_clustering(from_clustering, to_clustering, to_n2c):
+    """
+    Return the clusters which are different from gt
+    """
+    result = []
+    for from_c in from_clustering.values():
+        node = from_c.pop()  
+        from_c.add(node) 
+        to_c = to_clustering[to_n2c[node]]
+
+        if from_c != to_c:
+            result.append({'LCA clustering': from_c, 'GT clustering': to_c})
+
+    return result
+
+
+def precision_recall_per_size(est, est_n2c, gt, gt_n2c):
+    """
+    Calculate precision and recall for each cluster size individually.
+
+    :param est: Estimated clusters (dictionary of cluster ID to set of node IDs)
+    :param est_n2c: Estimated node-to-cluster mapping (dictionary of node ID to cluster ID)
+    :param gt: Ground truth clusters (dictionary of cluster ID to set of node IDs)
+    :param gt_n2c: Ground truth node-to-cluster mapping (dictionary of node ID to cluster ID)
+    :return: Dictionary with cluster sizes as keys and tuples of (precision, recall) as values
+    """
+    
+    tp_counts = defaultdict(int)
+    fp_counts = defaultdict(int)
+    fn_counts = defaultdict(int)
+    
+    # Calculate TP and FP for each estimated cluster size
+    for est_c in est.values():
+        cluster_size = len(est_c)
+        est_c_list = list(est_c)
+        for i, ni in enumerate(est_c_list):
+            for j in range(i + 1, len(est_c_list)):
+                nj = est_c_list[j]
+                if gt_n2c[ni] == gt_n2c[nj]:
+                    tp_counts[cluster_size] += 1
+                else:
+                    fp_counts[cluster_size] += 1
+    
+    # Calculate FN for each ground truth cluster size
+    for gt_c in gt.values():
+        cluster_size = len(gt_c)
+        gt_c_list = list(gt_c)
+        for i, ni in enumerate(gt_c_list):
+            for j in range(i + 1, len(gt_c_list)):
+                nj = gt_c_list[j]
+                if est_n2c[ni] != est_n2c[nj]:
+                    fn_counts[cluster_size] += 1
+
+    # Calculate precision and recall for each cluster size
+    precision_recall_per_size = {}
+    all_sizes = set(tp_counts.keys()).union(fp_counts.keys()).union(fn_counts.keys())
+
+    for size in all_sizes:
+        tp = tp_counts[size]
+        fp = fp_counts[size]
+        fn = fn_counts[size]
+        
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        
+        precision_recall_per_size[size] = (precision, recall)
+
+    return precision_recall_per_size
+
 
 def precision_recall(est, est_n2c, gt, gt_n2c):
     """
@@ -389,6 +459,7 @@ def precision_recall(est, est_n2c, gt, gt_n2c):
                 if est_n2c[ni] != est_n2c[nj]:
                     fn += 1
 
+
     precision = tp / (tp + fp)
     recall = tp / (tp + fn)
     return (precision, recall)
@@ -396,6 +467,8 @@ def precision_recall(est, est_n2c, gt, gt_n2c):
 
 def percent_and_PR(est, est_n2c, gt, gt_n2c):
     num_eq = count_equal_clustering(est, gt, gt_n2c)
+    non_eq = get_nonequal_clustering(est, gt, gt_n2c)
     pr, rec = precision_recall(est, est_n2c, gt, gt_n2c)
+    per_size = precision_recall_per_size(est, est_n2c, gt, gt_n2c)
     lng = len(est)
-    return (num_eq / lng, pr, rec)
+    return (num_eq / lng, pr, rec, per_size, non_eq)

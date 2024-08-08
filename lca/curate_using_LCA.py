@@ -54,8 +54,14 @@ class db_interface_generic(db_interface.db_interface):
         with open(self.db_file, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerows(quads)
-        
 
+
+    # def commit_cluster_change_db(self, quads):
+
+    #     with open(self.db_file, 'a', newline='') as f:
+    #         writer = csv.writer(f)
+    #         writer.writerows(quads)
+        
 
         
     

@@ -3,6 +3,7 @@ import json
 from run import run as run_lca
 from run_baseline import run as run_baseline
 from tools import *
+from init_logger import init_logger
 
 species = 'giraffe'
 x = 'num human'
@@ -82,5 +83,40 @@ def plot_two(species, config_path, x, y):
 
     plot(results_lca, results_baseline, x, y, f'tmp/plots/{species}_2.eps', xlabel="Probability of human review error", ylabel='Error rate')
 
-plot_one(species, config_path, x, y)
+
+def plot_per_cluster_size(species, config_path):
+
+
+    results_lca = []
+    config = get_config(config_path)
+
+        
+    results_lca = run_lca(config)[-1]
+
+    print(results_lca)
+    
+
+    precision = [entry[0] for entry in results_lca['per size'].values()]
+    cluster_sizes = [entry for entry in results_lca['per size'].keys()]
+
+    recall = [entry[1] for entry in results_lca['per size'].values()]
+
+
+    plt.plot(precision, cluster_sizes, marker='o', label='Precision')
+    plt.plot(recall, cluster_sizes, marker='o', label='Recall')
+
+
+    plt.xlabel('Cluster size')
+    plt.ylabel('Accuracy')
+    plt.title(species)
+    plt.grid(True)
+    plt.legend()
+
+
+    plt.savefig('/home/kate/code/lca/lca/tmp/plots/giraffe_per_cluster_size.eps')
+    plt.show()
+
+init_logger()
+# plot_one(species, config_path, x, y)
 # plot_two(species, config_path, x, y)
+# plot_per_cluster_size(species, config_path)

@@ -4,6 +4,7 @@ import json
 import networkx as nx
 import logging
 import os
+from tools import SetEncoder
 
 logger = logging.getLogger('lca')
 
@@ -67,7 +68,7 @@ class ClusterValidator(object):
             r_clustering, r_node2cid = self.create_reachable(G)
             info_text = 'Reachable stats'
             result = self.incremental_stats(
-                0, clustering, node2cid, r_clustering, r_node2cid, info_text
+                0, r_clustering, r_node2cid, self.gt_clustering, self.gt_node2cid, info_text
             )
             self.r_results = [result]
             self.prev_num_human = 0
@@ -92,7 +93,7 @@ class ClusterValidator(object):
     def incremental_stats(
             self, num_human, clustering, node2cid, true_clustering, true_node2cid, info_text="Incremental stats:"
         ):
-        frac, prec, rec = ct.percent_and_PR(
+        frac, prec, rec, per_size, non_equal_clustering = ct.percent_and_PR(
             clustering, node2cid, true_clustering, true_node2cid
         )
         result = {
@@ -102,10 +103,12 @@ class ClusterValidator(object):
             'frac correct': frac,
             'precision': prec,
             'recall': rec,
-            'error_rate': 1- frac
+            'error_rate': 1- frac,
+            'per size': per_size,
+            'non equal': non_equal_clustering
         }
 
-        logger.info(f'{info_text}: {json.dumps(result, indent=4)}')
+        logger.info(f'{info_text}: {json.dumps(result, indent=4, cls=SetEncoder)}')
         return result
 
 

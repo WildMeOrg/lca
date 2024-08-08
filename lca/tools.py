@@ -148,17 +148,20 @@ def generate_gt_clusters(df, name_key):
     cids_unique = df[name_key].unique()
     cids = [f'ct{idx}' for idx in range(len(cids_unique))]
     gt_clustering = {cid: [] for cid in cids}
+    ids = df.index.tolist()
+    node2uuid = {}
     
     for i, row in df.iterrows():
         cid = cids[list(cids_unique).index(row[name_key])]
         gt_clustering[cid].append(i)
         gt_node2cid[i] = cid
+        node2uuid[i] = row['uuid_x']
 
     gt_clustering = {
         cid: set(cluster) for cid, cluster in gt_clustering.items()
     }
 
-    return gt_clustering, gt_node2cid
+    return gt_clustering, gt_node2cid, node2uuid
 
 
 def print_intersect_stats(df,individual_key="name"):

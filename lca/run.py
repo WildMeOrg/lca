@@ -81,13 +81,16 @@ def run(config):
     print_intersect_stats(df, individual_key=filter_key)
 
    
+   # create cluster validator
+    filtered_df = df[df['uuid_x'].isin(uuids)]
+    gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(filtered_df, filter_key)
+    cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
+    ga_driver.set_validator_functions(cluster_validator.trace_start_human, cluster_validator.trace_iter_compare_to_gt)
+
 
     # create embeddings verifier
 
-    filtered_df = df[df['uuid_x'].isin(uuids)]
-    ids = filtered_df.index.tolist()
-
-    verifier_embeddings = Embeddings(embeddings, ids)
+    verifier_embeddings = Embeddings(embeddings, list(node2uuid.keys()))
     verifier_edges = verifier_embeddings.get_edges()
 
     # create human reviewer
@@ -96,15 +99,7 @@ def run(config):
         
     human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
     
-
     
-
-    # create cluster validator
-
-    gt_clustering, gt_node2cid = generate_gt_clusters(df, filter_key)
-    cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
-    ga_driver.set_validator_functions(cluster_validator.trace_start_human, cluster_validator.trace_iter_compare_to_gt)
-
 
     #curate LCA
 
@@ -138,7 +133,7 @@ def run(config):
     if is_finished and os.path.exists(autosave_file):
         os.remove(autosave_file)
 
-    return cluster_validator.gt_results
+    return cluster_validator.gt_results, node2uuid
 
 
 def parse_args():

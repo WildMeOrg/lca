@@ -1,1 +1,1 @@
-python3 run.py --config ./configs/config_zebra.yaml 
+python3 run.py --config ./configs/config_giraffe.yaml 
