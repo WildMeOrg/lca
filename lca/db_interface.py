@@ -208,8 +208,7 @@ class db_interface(object):  # NOQA
             for n in cc.removed_nodes:
                 assert n not in self.node_to_cid
 
-        # return self.commit_cluster_change_db(cc)
-        return None
+        return self.commit_cluster_change_db(cc.new_clustering)
     
     def commit_cluster_changes(self, changes, temporary=False):
         if temporary:

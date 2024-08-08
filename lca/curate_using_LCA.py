@@ -28,14 +28,27 @@ def create_file(path):
 
     return path
 
+def create_json_file(path):
+    dir_name = os.path.dirname(path)
+    
+    if not os.path.exists(dir_name):
+        os.makedirs(dir_name)
+        
+    data = {}
+    with open(path, 'w', newline='') as f:
+        json.dump(data, f)
+
+    return path
 
 
 
 
 
 class db_interface_generic(db_interface.db_interface):
-    def __init__(self, db_file, clustering):
+    def __init__(self, db_file, clustering_file, clustering):
         self.db_file = db_file if os.path.exists(db_file) else create_file(db_file)
+        self.clustering_file = clustering_file if os.path.exists(clustering_file) else create_json_file(clustering_file)
+
         
         quads = []
         with open(self.db_file, 'r') as f:
@@ -56,12 +69,10 @@ class db_interface_generic(db_interface.db_interface):
             writer.writerows(quads)
 
 
-    # def commit_cluster_change_db(self, quads):
-
-    #     with open(self.db_file, 'a', newline='') as f:
-    #         writer = csv.writer(f)
-    #         writer.writerows(quads)
+    def commit_cluster_change_db(self, clustering):
         
+        write_json(clustering, self.clustering_file)
+        return clustering
 
         
     
@@ -323,7 +334,8 @@ class curate_using_LCA(object):
                  human_reviewer,
                  wgtrs_calib_dict,
                  edge_db_file,
-                 current_clustering, #maybe comes from db file
+                 clustering_file, #maybe comes from db file
+                 current_clustering,
                  lca_config):
         self.verifier_alg = verifier_alg
         self.verifier_name = verifier_name
@@ -332,6 +344,7 @@ class curate_using_LCA(object):
         self.lca_config = lca_config
         self.edge_db_file = edge_db_file
         self.current_clustering = current_clustering
+        self.clustering_file = clustering_file
 
         # 1. Create weighter from calibration
 
@@ -353,7 +366,7 @@ class curate_using_LCA(object):
         self.lca_config['min_delta_score_stability'] = stability
 
         # 3.
-        self.db = db_interface_generic(self.edge_db_file, self.current_clustering)
+        self.db = db_interface_generic(self.edge_db_file, self.clustering_file, current_clustering)
 
         # 4. Create the edge generators
         self.edge_gen = edge_generator_generic(self.db, self.wgtr, self.verifier_alg, self.verifier_name)
