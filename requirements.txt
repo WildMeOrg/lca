@@ -5,6 +5,8 @@ matplotlib
 networkx
 numpy
 scipy
+scikit-learn
+pyyaml
 Sphinx
 sphinx-rtd-theme
 wbia-utool

@@ -1,27 +1,15 @@
+version.py
+
 .DS_Store
+__pycache__/
 
-failed_doctests.txt
-timeings.txt
-profile_output*.txt
+example/lca.log
+_version.py
 
-*.egg-info
-__pycache__
-_docs/_build
-_page/
+test*.png
 
-test_*.png
-*.log
+lca/tmp/
+data/configs/
+!data/configs/config.yaml
 
-lca.decisions.csv
-
-data/configs/config_*.yaml
-data/run_preprocess_*
-wbia_lca.orig
-
-lca/tmp/*
-
-ui/*
-
-lca/configs/*
-
-!lca/configs/config_default.yaml
+ui/node_modules
