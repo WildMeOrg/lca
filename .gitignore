@@ -9,7 +9,7 @@ _version.py
 test*.png
 
 lca/tmp/
-data/configs/
-!data/configs/config.yaml
+lca/data/configs/
+!lca/data/configs/config.yaml
 
 ui/node_modules

@@ -78,62 +78,64 @@ def load_pickle(file):
     return result
 
 
-def generate_ga_params(config_yaml):
+def generate_ga_params(config):
     
     ga_params = dict()
 
-    phc = float(config_yaml['edge_weights']['prob_human_correct'])
+    phc = float(config['edge_weights']['prob_human_correct'])
     assert 0 < phc <= 1
     ga_params['prob_human_correct'] = phc
-    s = config_yaml['edge_weights']['augmentation_names']
+    s = config['edge_weights']['augmentation_names']
     ga_params['aug_names'] = s.strip().split()
 
-    ga_params['num_pos_needed'] = config_yaml['edge_weights']['num_pos_needed']
-    ga_params['num_neg_needed'] = config_yaml['edge_weights']['num_neg_needed']
+    ga_params['num_pos_needed'] = config['edge_weights']['num_pos_needed']
+    ga_params['num_neg_needed'] = config['edge_weights']['num_neg_needed']
+
+    ga_params['distance_power'] = config['distance_power']
 
 
-    mult = float(config_yaml['iterations']['min_delta_converge_multiplier'])
+    mult = float(config['iterations']['min_delta_converge_multiplier'])
     ga_params['min_delta_converge_multiplier'] = mult
 
-    s = float(config_yaml['iterations']['min_delta_stability_ratio'])
+    s = float(config['iterations']['min_delta_stability_ratio'])
     assert s > 1
     ga_params['min_delta_stability_ratio'] = s
 
-    n = int(config_yaml['iterations']['num_per_augmentation'])
+    n = int(config['iterations']['num_per_augmentation'])
     assert n >= 1
     ga_params['num_per_augmentation'] = n
 
-    n = int(config_yaml['iterations']['tries_before_edge_done'])
+    n = int(config['iterations']['tries_before_edge_done'])
     assert n >= 1
     ga_params['tries_before_edge_done'] = n
 
-    i = int(config_yaml['iterations']['ga_iterations_before_return'])
+    i = int(config['iterations']['ga_iterations_before_return'])
     assert i >= 1
     ga_params['ga_iterations_before_return'] = i
 
-    mw = int(config_yaml['iterations']['ga_max_num_waiting'])
+    mw = int(config['iterations']['ga_max_num_waiting'])
     assert mw >= 1
     ga_params['ga_max_num_waiting'] = mw
 
-    should_densify_str = str(config_yaml['iterations'].get('should_densify', False)).lower()
+    should_densify_str = str(config['iterations'].get('should_densify', False)).lower()
     ga_params['should_densify'] = should_densify_str == 'true'
 
-    n = int(config_yaml['iterations'].get('densify_min_edges', 1))
+    n = int(config['iterations'].get('densify_min_edges', 1))
     assert n >= 1
     ga_params['densify_min_edges'] = n
 
-    df = float(config_yaml['iterations'].get('densify_frac', 0.0))
+    df = float(config['iterations'].get('densify_frac', 0.0))
     assert 0 <= df <= 1
     ga_params['densify_frac'] = df
 
-    log_level = config_yaml['logging']['log_level']
+    log_level = config['logging']['log_level']
     ga_params['log_level'] = log_level
-    log_file = config_yaml['logging']['log_file']
+    log_file = config['logging']['log_file']
     ga_params['log_file'] = log_file
 
-    draw_iterations_str = str(config_yaml['drawing'].get('draw_iterations', False)).lower()
+    draw_iterations_str = str(config['drawing'].get('draw_iterations', False)).lower()
     ga_params['draw_iterations'] = draw_iterations_str == 'true'
-    ga_params['drawing_prefix'] = config_yaml['drawing']['drawing_prefix']
+    ga_params['drawing_prefix'] = config['drawing']['drawing_prefix']
 
     logger = logging.getLogger('lca')
     handler = logging.FileHandler(log_file, mode='w')
