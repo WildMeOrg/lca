@@ -100,6 +100,16 @@ class exp_scores(object):  # NOQA
         else:
             s = self.trunc_exp_neg.sample()
         return s
+    
+    def raw_wgt_(self, s):
+        """Return a continuous-valued weight from the score, using
+        the scorer to get positive and negative histogram values.
+        """
+        hp, hn = self.get_pos_neg(s)
+        epsilon = 0.000001  # to prevent underflow / overflow
+        ratio = (hp + epsilon) / (hn + epsilon)
+        wgt = m.log(ratio)
+        return wgt
 
 
 class truncated_exponential(object):  # NOQA

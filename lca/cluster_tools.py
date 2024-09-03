@@ -408,11 +408,11 @@ def precision_recall_per_size(est, est_n2c, gt, gt_n2c):
         cluster_size = len(gt_c)
         gt_c_list = list(gt_c)
         for i, ni in enumerate(gt_c_list):
-            if ni not in est_n2c:
-                continue
+            # if ni not in est_n2c:
+            #     continue
             for j in range(i + 1, len(gt_c_list)):
                 nj = gt_c_list[j]
-                if (nj not in est_n2c) or (est_n2c[ni] != est_n2c[nj]):
+                if (ni not in est_n2c) or (nj not in est_n2c) or (est_n2c[ni] != est_n2c[nj]):
                     fn_counts[cluster_size] += 1
 
     # Calculate precision and recall for each cluster size
@@ -457,11 +457,11 @@ def precision_recall(est, est_n2c, gt, gt_n2c):
         gt_c_list = list(gt_c)
         
         for i, ni in enumerate(gt_c_list):
-            if ni not in est_n2c:
-                continue
+            # if ni not in est_n2c:
+            #     continue
             for j in range(i + 1, len(gt_c_list)):
                 nj = gt_c_list[j]
-                if (nj not in est_n2c) or (est_n2c[ni] != est_n2c[nj]):
+                if (ni not in est_n2c) or (nj not in est_n2c) or (est_n2c[ni] != est_n2c[nj]):
                     fn += 1
 
 

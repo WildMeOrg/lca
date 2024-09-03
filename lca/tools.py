@@ -77,6 +77,10 @@ def load_pickle(file):
         result = pickle.load(f_file)
     return result
 
+def save_pickle(x, file):
+    with open(file, 'wb') as f_file:
+        result = pickle.dump(x, f_file)
+    return result
 
 def generate_ga_params(config):
     

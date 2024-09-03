@@ -9,6 +9,7 @@ import compare_clusterings
 import db_interface_sim
 import edge_generator
 import exp_scores as es
+import gamma_scores as gs
 import graph_algorithm as ga
 import weighter
 from init_logger import get_formatter
@@ -192,6 +193,9 @@ def generate_weighters(ga_params, verifier_gt):
         scorer = es.exp_scores.create_from_samples(
             probs['gt_positive_probs'], probs['gt_negative_probs']
         )
+        # scorer = gs.gamma_scores.create_from_samples(
+        #     probs['gt_positive_probs'], probs['gt_negative_probs']
+        # )
         wgtr = weighter.weighter(scorer, ga_params['prob_human_correct'])
         wgtrs.append(wgtr)
 

@@ -2,7 +2,7 @@
 import logging
 import math as m
 import random
-
+import numpy as np
 import exp_scores as es
 
 #  Need to add weight according to verifier names!!!
@@ -25,7 +25,7 @@ class weighter(object):  # NOQA
         self.human_prob = human_prob
         self.incomparable_weight = 0
         self.max_weight = 100  # should not change
-        self.max_raw_weight = self.raw_wgt_(human_prob)
+        self.max_raw_weight = self.scorer.raw_wgt_(human_prob)
         logger.info(
             'Built weighter with human_prob %1.2f and max_weight %d'
             % (self.human_prob, self.max_weight)
@@ -33,7 +33,7 @@ class weighter(object):  # NOQA
 
     def wgt(self, score):
         """Given a verification score produce a (scalar) weight"""
-        w0 = self.raw_wgt_(score)
+        w0 = self.scorer.raw_wgt_(score)
         w = self.scale_and_trunc_(w0)
         return int(w)
 
@@ -69,22 +69,16 @@ class weighter(object):  # NOQA
         else:
             return -self.max_weight
 
-    def raw_wgt_(self, s):
-        """Return a continuous-valued weight from the score, using
-        the scorer to get positive and negative histogram values.
-        """
-        hp, hn = self.scorer.get_pos_neg(s)
-        epsilon = 0.000001  # to prevent underflow / overflow
-        ratio = (hp + epsilon) / (hn + epsilon)
-        wgt = m.log(ratio)
-        return wgt
-
+    
     def scale_and_trunc_(self, w0):
         """Map the weight into an integer in the range -max_weight,
         ... max_weight.
         """
-        w0 = max(-self.max_raw_weight, min(self.max_raw_weight, w0))
+        # logger.info(f"Input score: {w0}")
+        w0 = np.clip(w0, -self.max_raw_weight, self.max_raw_weight)
+        # logger.info(f"Clipped score: {w0}")
         w = round(w0 / self.max_raw_weight * self.max_weight)
+        # logger.info(f"Final score: {w}")
         return w
 
 
