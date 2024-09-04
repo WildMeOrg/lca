@@ -6,13 +6,14 @@ from sklearn.preprocessing import LabelEncoder
 from tools import *
 
 
-def load_to_df(anno_path):
+def load_to_df(anno_path,format='standard'):
     data = load_json(anno_path)
 
     dfa = pd.DataFrame(data['annotations'])
     dfi = pd.DataFrame(data['images'])
-    dfn = pd.DataFrame(data['individuals'])
-    dfc = pd.DataFrame(data['categories'])
+    if format == 'standard':
+        dfn = pd.DataFrame(data['individuals'])
+        dfc = pd.DataFrame(data['categories'])
 
     dfi = dfi.drop_duplicates(subset=['uuid'])
 
@@ -23,8 +24,10 @@ def load_to_df(anno_path):
     else:
         df = dfa.merge(dfi, left_on='image_id', right_on='id') 
 
-    df = df.merge(dfn, left_on='individual_uuid', right_on='uuid')
-    df = df.merge(dfc, left_on='category_id', right_on='id')
+    if format == 'standard':
+        df = df.merge(dfn, left_on='individual_uuid', right_on='uuid')
+        df = df.merge(dfc, left_on='category_id', right_on='id')
+
 
     print(f'** Loaded {anno_path} **')
     print('     ', f'Found {len(df)} annotations')
@@ -74,9 +77,9 @@ def filter_df(df, viewpoint_list, n_filter_min, n_subsample_max, embedding_uuids
 
     return df
 
-def preprocess_data(anno_path, name_keys=['name'], convert_names_to_ids=True, viewpoint_list=None, n_filter_min=None, n_filter_max=None, images_dir=None, embedding_uuids=None):
+def preprocess_data(anno_path, name_keys=['name'], convert_names_to_ids=True, viewpoint_list=None, n_filter_min=None, n_filter_max=None, images_dir=None, embedding_uuids=None, format='standard'):
 
-    df = load_to_df(anno_path)
+    df = load_to_df(anno_path, format)
 
     filter_key = '__'.join(name_keys)
     df[filter_key] = df[name_keys].apply(lambda row: '_'.join(row.values.astype(str)), axis=1)

@@ -97,6 +97,8 @@ def generate_ga_params(config):
 
     ga_params['distance_power'] = config['distance_power']
 
+    
+    ga_params['scorer'] = config['edge_weights']['scorer']
 
     mult = float(config['iterations']['min_delta_converge_multiplier'])
     ga_params['min_delta_converge_multiplier'] = mult

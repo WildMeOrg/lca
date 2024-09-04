@@ -190,12 +190,16 @@ def generate_weighters(ga_params, verifier_gt):
         assert aug in verifier_gt
         probs = verifier_gt[aug]
         logger.info('Building scorer and weighter for verifier %s' % aug)
-        scorer = es.exp_scores.create_from_samples(
-            probs['gt_positive_probs'], probs['gt_negative_probs']
-        )
-        # scorer = gs.gamma_scores.create_from_samples(
-        #     probs['gt_positive_probs'], probs['gt_negative_probs']
-        # )
+        scorer = ga_params['scorer']
+        if scorer == 'gamma':
+            scorer = gs.gamma_scores.create_from_samples(
+                probs['gt_positive_probs'], probs['gt_negative_probs']
+            )
+        else:
+            scorer = es.exp_scores.create_from_samples(
+                probs['gt_positive_probs'], probs['gt_negative_probs']
+            )
+        
         wgtr = weighter.weighter(scorer, ga_params['prob_human_correct'])
         wgtrs.append(wgtr)
 

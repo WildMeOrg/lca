@@ -1,4 +1,3 @@
 #!/bin/bash
 
-python3 run.py --config $1
-# ./configs/config_forestelephants.yaml 
+python3 run.py --config ./configs/config_forestelephants.yaml 

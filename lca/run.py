@@ -55,7 +55,8 @@ def run(config):
     embeddings, uuids = load_pickle(data_params['embedding_file'])
 
     #create db files
-    temp_db = lca_config['temp_db']
+    
+    temp_db = ('temp_db' in lca_config) and lca_config['temp_db']
     
     if temp_db:
         logger.info(f"Using temp database...")

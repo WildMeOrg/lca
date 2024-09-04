@@ -21,12 +21,14 @@ lca:
   verifier_name: 'miewid'            # Name of the verifier algorithm
   db_path: tmp/zebra_db              # Path to the database where rrsults are stored
   distance_power: 1
+  temp_db: True
 
   edge_weights:                      # weight calibration params
     prob_human_correct: 0.98         # Probability that a human verification is correct, needed for human review simulation
     augmentation_names: miewid human # Names of augmentations to be used
     num_pos_needed: 50               # Number of positive samples needed
     num_neg_needed: 50               # Number of negative samples needed
+    scorer: 'exp'                    # Scorer function, one of ['exp', 'gamma']
 
   iterations:                         #lca params
     min_delta_converge_multiplier: 0.95 
