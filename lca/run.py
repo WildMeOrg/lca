@@ -95,6 +95,7 @@ def run(config):
     filtered_df = df[df['uuid_x'].isin(uuids)]
     embeddings = [embeddings[uuids.index(uuid)] for uuid in filtered_df['uuid_x']]
     gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(filtered_df, filter_key)
+    logger.info(f"Ground truth clustering: {gt_clustering}")
     cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
     ga_driver.set_validator_functions(cluster_validator.trace_start_human, cluster_validator.trace_iter_compare_to_gt)
 

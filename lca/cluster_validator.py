@@ -104,8 +104,9 @@ class ClusterValidator(object):
             'precision': prec,
             'recall': rec,
             'error_rate': 1- frac,
-            'per size': per_size,
-            'non equal': non_equal_clustering
+            # 'per size': per_size,
+            'non equal': non_equal_clustering,
+            'current clustering': clustering
         }
 
         logger.info(f'{info_text}: {json.dumps(result, indent=4, cls=SetEncoder)}')

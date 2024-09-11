@@ -400,6 +400,8 @@ class graph_algorithm(object):  # NOQA
             # Step 2b: since the delta is <= 0, if we are in "scoring"
             # switch to splitting
             elif self.phase == 'scoring':
+                if self.trace_start_human_gt_cb is not None:
+                    self.trace_start_human_gt_cb(self.clustering, self.node2cid, self.G)
                 logger.info('Decision: switch phases to splitting')
                 self.phase = 'splitting'
                 self.queues.switch_to_splitting()
@@ -408,6 +410,7 @@ class graph_algorithm(object):  # NOQA
                 self.queues.info_long(max_entries=10)
                 if self.trace_start_human_gt_cb is not None:
                     self.trace_start_human_gt_cb(self.clustering, self.node2cid, self.G)
+                
 
             # Step 2c: consider shift from splitting to stability
             elif self.phase == 'splitting' and (
