@@ -69,8 +69,52 @@ class Embeddings(object):
             print(f"Chunk result: {time.time() - start_time:.6f} seconds, Total estimate: {len(self.embeddings) * (time.time() - start_time)/(60 * len(distmat)):.6f} minutes")
             start_time = time.time()
             start += filtered.shape[0]
+            # print(f"Max dist: {np.max(distmat[np.where(distmat != np.inf)])}")
         print(f"Calculated distances: {time.time() - start_time:.6f} seconds")
         print(f"{len(set(result))}")
         return set(result)
+
+
+    def get_baseline_edges(self, topk=10, distance_threshold=0.5):
+        def reduce_func(distmat, start):
+            distmat = 1 - self.get_score_from_cosine_distance(distmat)
+            rng = np.arange(distmat.shape[0])
+            distmat[rng, rng+start] = np.inf
+            return distmat
+
+        start_time = time.time()
+        print("Calculating distances...")
+        print(f"{len(self.embeddings)}/{len(self.ids)}")
+        
+        chunks = pairwise_distances_chunked(
+            self.embeddings,
+            metric='cosine',
+            reduce_func=reduce_func,
+            n_jobs=-1
+        )
+        
+        result = []
+        start = 0
+        
+        for distmat in chunks:
+            sorted_indices = np.argsort(distmat, axis=1)
+            
+            sorted_dists_mask = np.zeros_like(distmat, dtype=bool)
+            for i in range(distmat.shape[0]):
+                topk_indices = sorted_indices[i, :topk]
+                valid_topk_indices = topk_indices[distmat[i, topk_indices] <= distance_threshold]
+                sorted_dists_mask[i, valid_topk_indices] = True
+            
+            inds_y, inds_x = np.nonzero(sorted_dists_mask)
+            result.extend([(*sorted([self.ids[ind1 + start], self.ids[ind2]]), 1 - distmat[ind1, ind2]) for (ind1, ind2) in zip(inds_y, inds_x)])
+            
+            print(f"Chunk processed in: {time.time() - start_time:.6f} seconds")
+            start_time = time.time()
+            start += sorted_dists_mask.shape[0]
+        
+        print(f"Calculated distances in: {time.time() - start_time:.6f} seconds")
+        
+        return set(result)
+
 
 
