@@ -43,7 +43,8 @@ def call_verifier_alg(embeddings):
 
 
 def run(config):
-
+    np.random.seed(42)
+    random.seed(42)
     # init params
 
     lca_config = config['lca']
@@ -84,7 +85,7 @@ def run(config):
 
     filtered_df = df[df['uuid_x'].isin(uuids)]
     ids = filtered_df.index.tolist()
-
+    embeddings = [embeddings[uuids.index(uuid)] for uuid in filtered_df['uuid_x']]
     verifier_embeddings = Embeddings(embeddings, ids)
     verifier_edges = verifier_embeddings.get_edges()
 
@@ -97,14 +98,14 @@ def run(config):
     
     human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
 
-    pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
-    wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
+    # pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
+    # wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
 
     
 
     # create cluster validator
 
-    gt_clustering, gt_node2cid = generate_gt_clusters(df, filter_key)
+    gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(df, filter_key)
     cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
     ga_driver.set_validator_functions(cluster_validator.trace_start_human, cluster_validator.trace_iter_compare_to_gt)
 
@@ -120,14 +121,14 @@ def run(config):
     # verifier_alg = call_verifier_alg(verifier_embeddings)
     for thr in thrs:
         clustering, node2cid, num_human = baseline_clustering(list(gt_node2cid.keys()), verifier_edges, human_reviewer, thr)
-    # logger = logging.getLogger('lca')
         print(f" Threshold: {thr}")
         result = cluster_validator.incremental_stats(num_human, clustering, node2cid, gt_clustering, gt_node2cid)
+        result['score_threshold'] = thr
         results.append(result)
-
+    write_json(results, data_params['stats_file'])
     return results
 
-    # write_json(results, data_params['stats_file'])
+   
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Load configuration file.")
