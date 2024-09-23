@@ -143,11 +143,12 @@ def generate_ga_params(config):
     ga_params['draw_iterations'] = draw_iterations_str == 'true'
     ga_params['drawing_prefix'] = config['drawing']['drawing_prefix']
 
-    logger = logging.getLogger('lca')
-    handler = logging.FileHandler(log_file, mode='w')
-    handler.setLevel(log_level)
-    handler.setFormatter(get_formatter())
-    logger.addHandler(handler)
+    if log_file is not None:
+        logger = logging.getLogger('lca')
+        handler = logging.FileHandler(log_file, mode='w')
+        handler.setLevel(log_level)
+        handler.setFormatter(get_formatter())
+        logger.addHandler(handler)
 
     return ga_params
 

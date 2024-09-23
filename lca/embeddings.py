@@ -4,6 +4,7 @@ import time
 import scipy
 from scipy.spatial.distance import cosine
 from sklearn.metrics import pairwise_distances, pairwise_distances_chunked
+from sklearn.metrics.pairwise import cosine_similarity
 import sklearn
 
 
@@ -13,7 +14,8 @@ class Embeddings(object):
                  ids,
                  distance_power=1):
         self.embeddings = embeddings
-        self.ids = ids
+        self.uuids = ids
+        self.ids = list(ids.keys())
         self.distance_power = distance_power
 
 
@@ -27,11 +29,23 @@ class Embeddings(object):
     
     def get_score_from_cosine_distance(self, cosine_dist):
         return np.power(1 - cosine_dist*0.5, self.distance_power)
-        # return np.power(np.maximum(0, 1 - cosine_dist), self.distance_power)
+        # return np.power(np.maximum(0, 1 - cosine_dist), self.distance_power
+
+    def get_topk_acc(self, labels_q, labels_db, dists, topk):
+        return sum(self.get_topk_hits(labels_q, labels_db, dists, topk)) / len(labels_q)
 
 
-    
-    def get_edges(self, topk=5, target_edges=10000):
+    def get_topk_hits(self,labels_q, labels_db, dists, topk):
+        indices = np.argsort(dists, axis=1)
+        top_labels = np.array(labels_db)[indices[:, :topk]]
+        hits = (top_labels.T == labels_q).T
+        return np.sum(hits[:, :topk+1], axis=1) > 0
+
+    def get_top_ks(self,q_pids, distmat, ks=[1,3,5,10]):
+        return [(k, self.get_topk_acc(q_pids, q_pids, distmat, k)) for k in ks]
+
+
+    def get_stats(self, df, filter_key):
         def reduce_func(distmat, start):
             distmat = 1 - self.get_score_from_cosine_distance(distmat)
             # print(np.min(distmat), np.max(distmat))
@@ -46,11 +60,37 @@ class Embeddings(object):
             self.embeddings, #     self.embeddings/norm(self.embeddings, axis=1).reshape((-1,1)), 
             metric='cosine', #     metric=self.get_norm_embeddings_score,
             reduce_func=reduce_func, n_jobs=-1)#, working_memory=4)
+        
+        distmat = np.concatenate(list(chunks), axis=0)
+        labels = [df.loc[df['uuid_x'] == self.uuids[id], filter_key].values[0] for id in self.ids]
+        
+        top1, top3, top5, top10 = self.get_top_ks(labels, distmat, ks=[1,3,5,10])
+
+
+        return top1, top3, top5, top10
+
+    
+    def get_edges(self, topk=5, target_edges=10000):
+        def reduce_func(distmat, start):
+            distmat = 1 - self.get_score_from_cosine_distance(distmat)
+            # print(np.min(distmat), np.max(distmat))
+            # raise Exception("Sorry")
+            rng = np.arange(distmat.shape[0])
+            distmat[rng, rng+start] = np.inf
+            return distmat
+        start_time = time.time()
+        print("Calculating distances...")
+        # print(f"{len(self.embeddings)}/{len(self.ids)}")
+        chunks = pairwise_distances_chunked(
+            self.embeddings, #     self.embeddings/norm(self.embeddings, axis=1).reshape((-1,1)), 
+            metric='cosine', #     metric=self.get_norm_embeddings_score,
+            reduce_func=reduce_func, n_jobs=-1)#, working_memory=4)
         result = []
         start = 0
         embeds_num = len(self.embeddings)
         total_edges = (embeds_num * embeds_num - embeds_num)/2
         target_proportion = np.clip(target_edges/total_edges, 0, 1)
+        # print(f"Target: {target_edges}/{total_edges}")
         for distmat in chunks:
             sorted_dists = distmat.argsort(axis=1).argsort(axis=1) < topk
             # thresholded_dists = np.triu(distmat <= np.quantile(distmat.flatten(), distance_threshold), start)

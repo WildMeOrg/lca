@@ -91,8 +91,8 @@ def preprocess_data(anno_path, name_keys=['name'], convert_names_to_ids=True, vi
         names = df[filter_key].values
         names_id = convert_name_to_id(names)
         df['name_id'] = names_id
-
-    df['file_path'] = df['file_name'].apply(lambda x: os.path.join(images_dir, x))
+    if images_dir is not None:
+        df['file_path'] = df['file_name'].apply(lambda x: os.path.join(images_dir, x))
 
     df = df.reset_index(drop=True)
 

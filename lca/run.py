@@ -40,7 +40,19 @@ def call_verifier_alg(embeddings):
         return scores
     return verifier_alg
 
+# def remove_outliers(pairs, std_mult=2):
+#     scores = np.array([s for (_, _, s) in pairs])
+#     filter = np.abs(scores - np.mean(scores)) < std_mult * np.std(scores)
+#     return np.array(pairs)[filter], np.array(pairs)[np.logical_not(filter)]
 
+def remove_outliers(pairs, sign=1, std_mult=1.5):
+    scores = np.array([s for (_, _, s) in pairs])
+    if sign < 0:
+        filter = scores - np.mean(scores) < std_mult * np.std(scores)
+    else:
+        filter = scores - np.mean(scores) > -std_mult * np.std(scores)
+    # filter = np.abs(scores - np.mean(scores)) < std_mult * np.std(scores)
+    return np.array(pairs)[filter], np.array(pairs)[np.logical_not(filter)]
 
 def run(config):
     np.random.seed(42)
@@ -95,6 +107,9 @@ def run(config):
     filtered_df = df[df['uuid_x'].isin(uuids)]
     embeddings = [embeddings[uuids.index(uuid)] for uuid in filtered_df['uuid_x']]
     gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(filtered_df, filter_key)
+
+
+
     logger.info(f"Ground truth clustering: {gt_clustering}")
     cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
     ga_driver.set_validator_functions(cluster_validator.trace_start_human, cluster_validator.trace_iter_compare_to_gt)
@@ -103,8 +118,14 @@ def run(config):
     # create embeddings verifier
     print(len(node2uuid.keys()))
     print(len(embeddings))
-    verifier_embeddings = Embeddings(embeddings, list(node2uuid.keys()), distance_power=lca_params['distance_power'])
+    verifier_embeddings = Embeddings(embeddings, node2uuid, distance_power=lca_params['distance_power'])
     verifier_edges = verifier_embeddings.get_edges()
+
+
+    topk_results = verifier_embeddings.get_stats(filtered_df, filter_key)
+
+    logger.info(f"Statistics: " + ", ".join([f"{k}: {100*v:.2f}%" for (k, v) in topk_results]))
+   
 
     # create human reviewer
 
@@ -137,6 +158,16 @@ def run(config):
             
 
             pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
+            
+            logger.info(f"Num pos edges: {len(pos)}, num neg edges: {len(neg)}")
+            print(pos[0])
+            pos, pos_outliers = remove_outliers(pos, 1)
+            neg, neg_outliers = remove_outliers(neg, -1)
+            outliers = np.concatenate((pos_outliers, neg_outliers))
+            logger.info(f"Len before filtering: {len(verifier_edges)}")
+            verifier_edges = [edge for edge in verifier_edges if edge not in outliers]
+            logger.info(f"Len after filtering: {len(verifier_edges)}")
+            
             wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
         
             lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, clustering_file, current_clustering, lca_params)

@@ -9,6 +9,7 @@ import compare_clusterings
 import db_interface_sim
 import edge_generator
 import exp_scores as es
+import extexp_scores as ees
 import gamma_scores as gs
 import graph_algorithm as ga
 import weighter
@@ -193,6 +194,10 @@ def generate_weighters(ga_params, verifier_gt):
         scorer = ga_params['scorer']
         if scorer == 'gamma':
             scorer = gs.gamma_scores.create_from_samples(
+                probs['gt_positive_probs'], probs['gt_negative_probs']
+            )
+        elif scorer == 'extexp':
+            scorer = ees.extexp_scores.create_from_samples(
                 probs['gt_positive_probs'], probs['gt_negative_probs']
             )
         else:
