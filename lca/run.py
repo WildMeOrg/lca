@@ -11,6 +11,7 @@ from init_logger import init_logger
 import tempfile
 import argparse
 import shutil
+import datetime
 
 
 
@@ -45,14 +46,14 @@ def call_verifier_alg(embeddings):
 #     filter = np.abs(scores - np.mean(scores)) < std_mult * np.std(scores)
 #     return np.array(pairs)[filter], np.array(pairs)[np.logical_not(filter)]
 
-def remove_outliers(pairs, sign=1, std_mult=1.5):
+def remove_outliers(pairs, sign=1, std_mult=2.5):
     scores = np.array([s for (_, _, s) in pairs])
     if sign < 0:
-        filter = scores - np.mean(scores) < std_mult * np.std(scores)
+        filter = scores - np.mean(scores) > std_mult * np.std(scores)
     else:
-        filter = scores - np.mean(scores) > -std_mult * np.std(scores)
+        filter = np.mean(scores) - scores > std_mult * np.std(scores)
     # filter = np.abs(scores - np.mean(scores)) < std_mult * np.std(scores)
-    return np.array(pairs)[filter], np.array(pairs)[np.logical_not(filter)]
+    return np.array(pairs)[np.logical_not(filter)], np.array(pairs)[filter]
 
 def run(config):
     np.random.seed(42)
@@ -60,8 +61,15 @@ def run(config):
     logger = logging.getLogger('lca')
     # init params
 
+    
     lca_config = config['lca']
     data_params = config['data']
+    exp_name = config['exp_name']
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file_name = f"tmp/logs/{exp_name}_{timestamp}.log"
+    lca_config['logging']['log_file'] = log_file_name
+
+
     lca_params = generate_ga_params(lca_config)
     
     embeddings, uuids = load_pickle(data_params['embedding_file'])
@@ -169,6 +177,32 @@ def run(config):
             logger.info(f"Len after filtering: {len(verifier_edges)}")
             
             wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
+
+            wgtrs = ga_driver.generate_weighters(
+                lca_params, wgtrs_calib_dict
+            )
+            wgtr = wgtrs[0] 
+            save_pickle(wgtr, "/ekaterina/work/src/lca/lca/tmp/wgtr_extexp_uns.pickle")
+
+            # logger.info(f"positive edges to calibrate the weight function:")
+
+            # for a0, a1, s in pos:
+            #     logger.info(f"a0: {a0}, a1: {a1}, s:{s}, w:{wgtr.wgt(s)}")
+
+
+            # logger.info(f"negative edges to calibrate the weight function:")
+
+            # for a0, a1, s in neg:
+            #     logger.info(f"a0: {a0}, a1: {a1}, s:{s}, w:{wgtr.wgt(s)}")
+
+            # logger.info(f"initial edges:")
+
+            all_edges_plot = []
+
+            for a0, a1, s in verifier_edges:
+                # logger.info(f"a0: {a0}, a1: {a1}, s:{s}, w:{wgtr.wgt(s)}")
+                all_edges_plot.append((a0, a1, s, wgtr.wgt(s), gt_node2cid[int(a0)]== gt_node2cid[int(a1)]))
+            write_json(all_edges_plot, "/ekaterina/work/src/lca/lca/tmp/initial_edges_extexp_uns.json")
         
             lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, clustering_file, current_clustering, lca_params)
             cluster_changes, is_finished = lca_object.curate(verifier_edges, human_reviews)

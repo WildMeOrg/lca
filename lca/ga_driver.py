@@ -11,7 +11,9 @@ import edge_generator
 import exp_scores as es
 import extexp_scores as ees
 import gamma_scores as gs
+import kernel_density_scores
 import graph_algorithm as ga
+import logistic_scores
 import weighter
 from init_logger import get_formatter
 
@@ -198,6 +200,14 @@ def generate_weighters(ga_params, verifier_gt):
             )
         elif scorer == 'extexp':
             scorer = ees.extexp_scores.create_from_samples(
+                probs['gt_positive_probs'], probs['gt_negative_probs']
+            )
+        elif scorer == 'logistic':
+            scorer = logistic_scores.logistic_scores.create_from_samples(
+                probs['gt_positive_probs'], probs['gt_negative_probs']
+            )
+        elif scorer == 'kde':
+            scorer = kernel_density_scores.kernel_density_scores.create_from_samples(
                 probs['gt_positive_probs'], probs['gt_negative_probs']
             )
         else:

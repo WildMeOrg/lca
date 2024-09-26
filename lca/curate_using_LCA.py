@@ -9,6 +9,9 @@ import random
 import logging
 from tools import *
 from ga_driver import IterationHalt, IterationPause, IterationConverged
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+import numpy as np
 
 
 """
@@ -180,6 +183,38 @@ class edge_generator_generic(edge_generator.edge_generator):  # NOQA
         self.set_edge_requests(requests_to_keep)
 
 
+
+
+
+def find_uncertainty_ranges(all_vals):
+    # Extract the scores and labels (True/False)
+    X = np.array([[score] for (_, _, score, label) in all_vals])  # Using score as the feature
+    y = np.array([label for (_, _, score, label) in all_vals]).astype(int)  # True/False as 1/0
+    
+    # Standardize the score for better logistic regression performance
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    # Use Logistic Regression with probability estimates (Bayesian models provide this inherently)
+    model = LogisticRegression(class_weight="balanced")
+    model.fit(X_scaled, y)
+    
+    # Predict probabilities
+    probabilities = model.predict_proba(X_scaled)[:, 1]  # Probability of being True (1)
+    
+    # Identify regions where the probabilities are near 0.5 (mixed True/False)
+    uncertainty_threshold = 0.2  # Define how close to 0.5 the probability should be
+    uncertain_indices = np.where((probabilities > 0.5 - uncertainty_threshold) &
+                                 (probabilities < 0.5 + uncertainty_threshold))[0]
+    
+    uncertain_vals = [all_vals[i][2] for i in uncertain_indices]
+    
+    # for i in uncertain_indices:
+    #     print(f"Score: {all_vals[i][2]}, Probability of True: {probabilities[i]}, Uncertain: True")
+    
+    return [np.min(uncertain_vals), np.max(uncertain_vals)]
+
+
 """
 Given 
 (1) a list of verifier edge triples (n0, n1, score), where
@@ -262,7 +297,37 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
             break
         i = j
 
+
+    all_vals = [(n0, n1, s, True) for triple in pos_triples]
+    all_vals += [(n0, n1, s, False) for triple in neg_triples]
+    r = 0.2
+    N = 30
+    all_vals = [(n0, n1, s, True) for n0, n1, s in pos_triples]
+    all_vals += [(n0, n1, s, False) for n0, n1, s in neg_triples]
+    uncertain_vals = find_uncertainty_ranges(all_vals)
+    print(uncertain_vals)
+
+    uncertain_edges = [(n0, n1, s) for n0, n1, s in verifier_edges if (uncertain_vals[0]) <= s <= (uncertain_vals[1])]
+    
+    if len(uncertain_edges) < N:
+        print(f"Only {len(uncertain_edges)} edges found in the uncertain range.")
+        selected_edges = uncertain_edges
+    else:
+        selected_edges = random.sample(uncertain_edges, N)
+    
+    # Send selected edges to human reviewer
+    reviews, quit_lca = human_reviewer([(n0, n1) for n0, n1, s in selected_edges])
+    
+
+    for n0, n1, b in reviews:
+        e = (n0, n1, edge_scores[(n0, n1)])
+        if b:
+            pos_triples.append(e)
+        else:
+            neg_triples.append(e)
+
     return pos_triples, neg_triples, quit_lca
+    # return pos_triples, neg_triples, quit_lca, None, [None]
 
 
 """
