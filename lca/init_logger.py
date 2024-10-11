@@ -7,8 +7,22 @@ LOGGING_LEVEL = logging.INFO
 def get_formatter():
     return logging.Formatter(LOGGING_FORMAT)
 
+
+def reset_logging():
+    logger = logging.getLogger('lca')
+    print(f"Resetting loggers: {logger}")
+    handlers = logger.handlers[:]
+    for handler in handlers:
+        logger.removeHandler(handler)
+        handler.flush()
+        handler.close()
+    logger.setLevel(logging.NOTSET)
+    logger.propagate = True
+    logger.handlers.clear()
+
 def init_logger():
     print("INIT")
+    reset_logging()
 
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.WARNING)

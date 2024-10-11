@@ -13,6 +13,8 @@ data/configs/
 !data/configs/config.yaml
 
 lca/configs/
+lca/data/embeddings/
+lca/visualisations/
 !lca/configs/config_default.yaml
 
 ui/node_modules

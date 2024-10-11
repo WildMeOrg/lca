@@ -36,6 +36,14 @@ class weighter(object):  # NOQA
         w0 = self.scorer.raw_wgt_(score)
         w = self.scale_and_trunc_(w0)
         return int(w)
+    
+    def wgt_smooth(self, score):
+        """Given a verification score produce a (scalar) weight"""
+        w0 = self.scorer.raw_wgt_(score)
+        w0 = np.clip(w0, -self.max_raw_weight, self.max_raw_weight)
+        # logger.info(f"Clipped score: {w0}")
+        w = w0 / self.max_raw_weight * self.max_weight
+        return w
 
     def human_wgt(self, is_marked_correct):
         """Given a human decision, produce a weight"""

@@ -84,7 +84,7 @@ def baseline_clustering(all_nodes, verifier_edges, human_reviewer, threshold):
         idx += 1
     node2cid = ct.build_node_to_cluster_mapping(clustering)
     
-    return clustering, node2cid, num_human
+    return clustering, node2cid, num_human, new_G
 
 
 

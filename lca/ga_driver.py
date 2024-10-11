@@ -369,8 +369,13 @@ class ga_driver(object):  # NOQA
         cid_graph = nx.Graph()
         
         cid_graph.add_nodes_from(self.direct_cids)
-        cid_graph.add_edges_from(self.cid_pairs)
+        
 
+        for n1, n2 in self.cid_pairs:
+            if cid_graph.has_edge(n1, n2):
+                cid_graph.remove_edge(n1, n2)
+        
+        cid_graph.add_edges_from(self.cid_pairs)
         
         for cc in nx.connected_components(cid_graph):
             cids = list(cc)

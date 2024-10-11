@@ -98,5 +98,31 @@ def preprocess_data(anno_path, name_keys=['name'], convert_names_to_ids=True, vi
 
     return df
 
+
+def save_data(df, output_path):
+    df_annotations_fields = ['uuid_x', 'image_uuid', 'bbox', 'theta', 'name', 'viewpoint', 'name_viewpoint','category_id']
+    df_annotations = df[df_annotations_fields]
+    df_annotations = df_annotations.rename(columns={'uuid_x': 'uuid'})
+
+
+    df_images_fields = ['image_uuid', 'file_name', 'height', 'width', 'date_captured']
+    df_images_fields= df.columns.intersection(df_images_fields)
+    df_images = df[df_images_fields].drop_duplicates(keep='first').reset_index(drop=True)
+    df_images = df_images.rename(columns={'image_uuid': 'uuid'})
+
+
+    df_categories_fields = ['category_id', 'species']
+    df_categories = df[df_categories_fields].drop_duplicates(keep='first').reset_index(drop=True)
+    df_categories = df_categories.rename(columns={'category_id': 'id'})
+
+    result_dict = {'categories': df_categories.to_dict(orient='records'),
+                   'images': df_images.to_dict(orient='records'),
+                   'annotations': df_annotations.to_dict(orient='records')}
+
+    with open(output_path, 'w') as f:
+        json.dump(result_dict, f, indent=4)
+        print('Data is saved to:', output_path)
+    return df
+
 if __name__ == "__main__":
     pass

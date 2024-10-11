@@ -11,9 +11,6 @@ from init_logger import init_logger
 import tempfile
 import argparse
 import shutil
-import datetime
-from baseline_clustering import baseline_clustering
-
 
 
 
@@ -43,19 +40,7 @@ def call_verifier_alg(embeddings):
         return scores
     return verifier_alg
 
-# def remove_outliers(pairs, std_mult=2):
-#     scores = np.array([s for (_, _, s) in pairs])
-#     filter = np.abs(scores - np.mean(scores)) < std_mult * np.std(scores)
-#     return np.array(pairs)[filter], np.array(pairs)[np.logical_not(filter)]
 
-def remove_outliers(pairs, sign=1, std_mult=2.5):
-    scores = np.array([s for (_, _, s) in pairs])
-    if sign < 0:
-        filter = scores - np.mean(scores) > std_mult * np.std(scores)
-    else:
-        filter = np.mean(scores) - scores > std_mult * np.std(scores)
-    # filter = np.abs(scores - np.mean(scores)) < std_mult * np.std(scores)
-    return np.array(pairs)[np.logical_not(filter)], np.array(pairs)[filter]
 
 def run(config):
     np.random.seed(42)
@@ -63,22 +48,14 @@ def run(config):
     logger = logging.getLogger('lca')
     # init params
 
-    
     lca_config = config['lca']
     data_params = config['data']
-    exp_name = config['exp_name']
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file_name = f"tmp/logs/{exp_name}_baseline_threshold.log"
-    lca_config['logging']['log_file'] = log_file_name
-
-
     lca_params = generate_ga_params(lca_config)
     
     embeddings, uuids = load_pickle(data_params['embedding_file'])
 
     #create db files
-    
-    temp_db = ('temp_db' in lca_config) and lca_config['temp_db']
+    temp_db = lca_config['temp_db']
     
     if temp_db:
         logger.info(f"Using temp database...")
@@ -108,7 +85,7 @@ def run(config):
                         n_filter_max=data_params['n_filter_max'],
                         images_dir = data_params['images_dir'], 
                         embedding_uuids = uuids,
-                        format='old'
+                        format='drone'
                     )
     
     print_intersect_stats(df, individual_key=filter_key)
@@ -118,10 +95,6 @@ def run(config):
     filtered_df = df[df['uuid_x'].isin(uuids)]
     embeddings = [embeddings[uuids.index(uuid)] for uuid in filtered_df['uuid_x']]
     gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(filtered_df, filter_key)
-
-
-
-    logger.info(f"Ground truth clustering: {gt_clustering}")
     cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
     ga_driver.set_validator_functions(cluster_validator.trace_start_human, cluster_validator.trace_iter_compare_to_gt)
 
@@ -129,49 +102,53 @@ def run(config):
     # create embeddings verifier
     print(len(node2uuid.keys()))
     print(len(embeddings))
-    verifier_embeddings = Embeddings(embeddings, node2uuid, distance_power=lca_params['distance_power'])
+    verifier_embeddings = Embeddings(embeddings, list(node2uuid.keys()), distance_power=lca_params['distance_power'])
     verifier_edges = verifier_embeddings.get_edges()
-    
-
-
-    topk_results = verifier_embeddings.get_stats(filtered_df, filter_key)
-
-    logger.info(f"Statistics: " + ", ".join([f"{k}: {100*v:.2f}%" for (k, v) in topk_results]))
-   
 
     # create human reviewer
 
     prob_human_correct = lca_params['prob_human_correct']
         
     human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
-    # run baseline
+    
+    
 
-    human_reviews = []
-    results = []
-    current_clustering={}
-    cluster_data = {}
-    verifier_name = lca_config['verifier_name']
-    # thrs = [0.1, 0.2, 0.35, 0.4, 0.45, 0.5]
-    thrs = [0.5, 0.45, 0.4, 0.35, 0.2, 0.1]
-    # verifier_alg = call_verifier_alg(verifier_embeddings)
-    for thr in thrs:
-        clustering, node2cid, num_human, G = baseline_clustering(list(gt_node2cid.keys()), verifier_edges, human_reviewer, thr)
-        print(f" Threshold: {thr}")
-        if num_human == 0:
-            print("Initiate tracing")
-            cluster_validator.trace_start_human(clustering, node2cid, G)            
+    #curate LCA
+    try:
+        human_reviews = []
+        current_clustering={}
+        cluster_data = {}
+        verifier_name = lca_config['verifier_name']
+        verifier_alg = call_verifier_alg(verifier_embeddings)
+
+        if os.path.exists(autosave_file):
+            wgtrs_calib_dict = load_json(verifier_file)
+            autosave_object = load_json(autosave_file)
+            current_clustering = autosave_object['clustering']
+            cluster_ids_to_check = autosave_object['cluster_ids_to_check']
+            lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, clustering_file, current_clustering, lca_params)
+            cluster_changes, is_finished = lca_object.curate([], [], cluster_ids_to_check)
         else:
-            cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, G)
-        
-        cluster_validator.gt_results[-1]['score_threshold'] = thr
-        cluster_validator.r_results[-1]['score_threshold'] = thr
-        # result = cluster_validator.incremental_stats(num_human, clustering, node2cid, gt_clustering, gt_node2cid)
-        # result['score_threshold'] = thr
-        # results.append(result)
-    # write_json(cluster_validator.gt_results, data_params['stats_file'])
-    return cluster_validator.gt_results, cluster_validator.r_results, node2uuid
+            # generate wgtr calibration    
 
-   
+            num_pos_needed = lca_params['num_pos_needed']
+            num_neg_needed = lca_params['num_neg_needed']
+            
+
+            pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
+            wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
+        
+            lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, clustering_file, current_clustering, lca_params)
+            cluster_changes, is_finished = lca_object.curate(verifier_edges, human_reviews)
+
+        write_json(lca_object.db.clustering, clustering_file)
+        if is_finished and os.path.exists(autosave_file):
+            os.remove(autosave_file)
+    finally:
+        if temp_db:
+            shutil.rmtree(db_path)
+    return cluster_validator.gt_results, node2uuid
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Load configuration file.")
@@ -192,3 +169,4 @@ if __name__ == '__main__':
     config = get_config(config_path)
 
     run(config)
+       

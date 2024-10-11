@@ -235,7 +235,8 @@ signal.
 def generate_wgtr_calibration_ground_truth(verifier_edges,
                                            human_reviewer,
                                            num_pos_needed,
-                                           num_neg_needed):
+                                           num_neg_needed,
+                                           num_bins=1):
 
     # Method: The range of scores is divided up into equally-sized
     # bins and the verifier edges are assigned to the bins based
@@ -245,7 +246,7 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
     # in small batches and the results are saved.
 
     # 1. For the bins
-    num_bins = 10
+    # num_bins = 10
     scores = [s for _, _, s in verifier_edges]
     min_score = min(scores)
     max_score = max(scores)
@@ -298,37 +299,125 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
         i = j
 
 
-    all_vals = [(n0, n1, s, True) for triple in pos_triples]
-    all_vals += [(n0, n1, s, False) for triple in neg_triples]
-    r = 0.2
-    N = 30
-    all_vals = [(n0, n1, s, True) for n0, n1, s in pos_triples]
-    all_vals += [(n0, n1, s, False) for n0, n1, s in neg_triples]
-    uncertain_vals = find_uncertainty_ranges(all_vals)
-    print(uncertain_vals)
+    # all_vals = [(n0, n1, s, True) for triple in pos_triples]
+    # all_vals += [(n0, n1, s, False) for triple in neg_triples]
+    # r = 0.2
+    # N = 30
+    # all_vals = [(n0, n1, s, True) for n0, n1, s in pos_triples]
+    # all_vals += [(n0, n1, s, False) for n0, n1, s in neg_triples]
+    # uncertain_vals = find_uncertainty_ranges(all_vals)
+    # print(uncertain_vals)
 
-    uncertain_edges = [(n0, n1, s) for n0, n1, s in verifier_edges if (uncertain_vals[0]) <= s <= (uncertain_vals[1])]
+    # uncertain_edges = [(n0, n1, s) for n0, n1, s in verifier_edges if (uncertain_vals[0]) <= s <= (uncertain_vals[1])]
     
-    if len(uncertain_edges) < N:
-        print(f"Only {len(uncertain_edges)} edges found in the uncertain range.")
-        selected_edges = uncertain_edges
-    else:
-        selected_edges = random.sample(uncertain_edges, N)
+    # if len(uncertain_edges) < N:
+    #     print(f"Only {len(uncertain_edges)} edges found in the uncertain range.")
+    #     selected_edges = uncertain_edges
+    # else:
+    #     selected_edges = random.sample(uncertain_edges, N)
     
-    # Send selected edges to human reviewer
-    reviews, quit_lca = human_reviewer([(n0, n1) for n0, n1, s in selected_edges])
+    # # Send selected edges to human reviewer
+    # reviews, quit_lca = human_reviewer([(n0, n1) for n0, n1, s in selected_edges])
     
 
-    for n0, n1, b in reviews:
-        e = (n0, n1, edge_scores[(n0, n1)])
-        if b:
-            pos_triples.append(e)
-        else:
-            neg_triples.append(e)
+    # for n0, n1, b in reviews:
+    #     e = (n0, n1, edge_scores[(n0, n1)])
+    #     if b:
+    #         pos_triples.append(e)
+    #     else:
+    #         neg_triples.append(e)
 
     return pos_triples, neg_triples, quit_lca
     # return pos_triples, neg_triples, quit_lca, None, [None]
 
+
+
+def generate_ground_truth_random(verifier_edges,
+                                           human_reviewer,
+                                           num_pos_needed,
+                                           num_neg_needed):
+
+    verifier_edges = list(verifier_edges)
+    # Shuffle verifier edges randomly
+    random.shuffle(verifier_edges)
+
+    # Prepare lists to store results
+    pos_triples = []
+    neg_triples = []
+
+    # Send edges to the human reviewer in small batches
+    num_in_batch = max(4, (num_pos_needed + num_neg_needed) // 2)
+    i = 0
+    quit_lca = False
+
+    while i < len(verifier_edges):
+        # Select a batch of edges
+        j = min(i + num_in_batch, len(verifier_edges))
+        edges_batch = verifier_edges[i:j]
+
+        # Get reviews from the human reviewer
+        reviews, quit_lca = human_reviewer([(n0, n1) for n0, n1, s in edges_batch])
+
+        for n0, n1, b in reviews:
+            e = (n0, n1, next(s for x0, x1, s in verifier_edges if x0 == n0 and x1 == n1))
+            if b:
+                pos_triples.append(e)
+            else:
+                neg_triples.append(e)
+
+        # Break if enough positive and negative triples are found
+        if len(pos_triples) >= num_pos_needed and len(neg_triples) >= num_neg_needed:
+            break
+
+        i = j
+
+    return pos_triples, neg_triples, quit_lca
+
+def generate_wgtr_calibration_random_bins(verifier_edges,
+                                           human_reviewer,
+                                           needed_total,
+                                           min_samples_from_bin,
+                                           num_bins=2):
+
+    # Method: The range of scores is divided up into equally-sized
+    # bins and the verifier edges are assigned to the bins based
+    # on their score.  After shuffling each bins, edges are picked
+    # one by one from each bin and saved in a list until the bins
+    # are empty. Edges from the list are sent to the human_reviewer
+    # in small batches and the results are saved.
+
+    # 1. For the bins
+    # num_bins = 10
+    scores = [s for _, _, s in verifier_edges]
+    min_score = min(scores)
+    max_score = max(scores)
+    delta_score = (max_score - min_score) / (num_bins-1)
+    bins = [[] for _ in range(num_bins)]
+    for n0, n1, s in verifier_edges:
+        i = int((s - min_score) / delta_score)
+        bins[i].append((n0, n1, s))
+
+    logger = logging.getLogger('lca')
+    logger.info(f"Bin sizes: {[len(b) for b in bins]}")
+
+    pos_triples = []
+    neg_triples = []
+    # 3. Pull edges from the bins
+    for i in range(len(bins)):
+        batch_sz = np.clip(int(needed_total * len(bins[i])/len(scores)), min_samples_from_bin, len(bins[i]))
+        rnd_edges = [bins[i][j] for j in np.random.choice(len(bins[i]), batch_sz, replace=False)]
+        edge_nodes = [(n0, n1) for (n0, n1, s) in rnd_edges]
+        edge_scores = {(n0, n1):s for (n0, n1, s) in rnd_edges}
+        reviews, quit_lca = human_reviewer(edge_nodes)
+        # if quit_lca:
+        #     break
+        for n0, n1, b in reviews:
+            e = (n0, n1, edge_scores[(n0, n1)])
+            if b:
+                pos_triples.append(e)
+            else:
+                neg_triples.append(e)
+    return pos_triples, neg_triples, quit_lca
 
 """
 verifier_alg: function:
@@ -527,6 +616,8 @@ class curate_using_LCA(object):
                 #      and commitment.
                 cluster_changes.append(next_cluster_changes.cluster_changes)
                 self.db.commit_cluster_changes(next_cluster_changes.cluster_changes)
+
+                
         return (cluster_changes, True)
 
 

@@ -70,7 +70,7 @@ class Embeddings(object):
         return top1, top3, top5, top10
 
     
-    def get_edges(self, topk=5, target_edges=10000):
+    def get_edges(self, topk=5, target_edges=10000, uuids_filter=None):
         def reduce_func(distmat, start):
             distmat = 1 - self.get_score_from_cosine_distance(distmat)
             # print(np.min(distmat), np.max(distmat))
@@ -79,15 +79,26 @@ class Embeddings(object):
             distmat[rng, rng+start] = np.inf
             return distmat
         start_time = time.time()
+
+
+        if uuids_filter is not None:
+            embeddings = [emb for emb, id in zip(self.embeddings, self.uuids.keys()) if self.uuids[id] in uuids_filter]
+            ids = [id for id in self.uuids.keys() if self.uuids[id] in uuids_filter]
+        else:
+            embeddings = self.embeddings
+            ids = self.ids
+
+
+
         print("Calculating distances...")
         # print(f"{len(self.embeddings)}/{len(self.ids)}")
         chunks = pairwise_distances_chunked(
-            self.embeddings, #     self.embeddings/norm(self.embeddings, axis=1).reshape((-1,1)), 
+            embeddings, #     self.embeddings/norm(self.embeddings, axis=1).reshape((-1,1)), 
             metric='cosine', #     metric=self.get_norm_embeddings_score,
             reduce_func=reduce_func, n_jobs=-1)#, working_memory=4)
         result = []
         start = 0
-        embeds_num = len(self.embeddings)
+        embeds_num = len(embeddings)
         total_edges = (embeds_num * embeds_num - embeds_num)/2
         target_proportion = np.clip(target_edges/total_edges, 0, 1)
         # print(f"Target: {target_edges}/{total_edges}")
@@ -105,8 +116,8 @@ class Embeddings(object):
 
             filtered = np.logical_or(sorted_dists, selected_dists)
             inds_y, inds_x = np.nonzero(filtered)
-            result.extend([(*sorted([self.ids[ind1+start], self.ids[ind2]]), 1-distmat[ind1, ind2]) for (ind1, ind2) in zip(inds_y, inds_x)])
-            print(f"Chunk result: {time.time() - start_time:.6f} seconds, Total estimate: {len(self.embeddings) * (time.time() - start_time)/(60 * len(distmat)):.6f} minutes")
+            result.extend([(*sorted([ids[ind1+start], ids[ind2]]), 1-distmat[ind1, ind2]) for (ind1, ind2) in zip(inds_y, inds_x)])
+            print(f"Chunk result: {time.time() - start_time:.6f} seconds, Total estimate: {len(embeddings) * (time.time() - start_time)/(60 * len(distmat)):.6f} minutes")
             start_time = time.time()
             start += filtered.shape[0]
             # print(f"Max dist: {np.max(distmat[np.where(distmat != np.inf)])}")

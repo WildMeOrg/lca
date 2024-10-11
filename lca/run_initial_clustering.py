@@ -1,7 +1,7 @@
 import numpy as np
 from preprocess import preprocess_data
 from embeddings import Embeddings
-from curate_using_LCA import curate_using_LCA, generate_wgtr_calibration_ground_truth, generate_ground_truth_random, generate_wgtr_calibration_random_bins
+from curate_using_LCA import curate_using_LCA, generate_wgtr_calibration_ground_truth
 from tools import *
 import random
 import os
@@ -12,7 +12,7 @@ import tempfile
 import argparse
 import shutil
 import datetime
-import networkx as nx
+import pandas as pd
 
 
 
@@ -61,48 +61,37 @@ def run(config):
     random.seed(42)
     logger = logging.getLogger('lca')
     # init params
+
     
     lca_config = config['lca']
     data_params = config['data']
     exp_name = config['exp_name']
-    species = config['species']
-
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    if lca_config['logging'].get("update_log_file", True):
-        log_file_name = f"tmp/logs/{exp_name}_{timestamp}.log"
-        lca_config['logging']['log_file'] = log_file_name
+    log_file_name = f"tmp/logs/{exp_name}_{timestamp}.log"
+    lca_config['logging']['log_file'] = log_file_name
 
 
     lca_params = generate_ga_params(lca_config)
+    
+    embeddings_query, uuids_query = load_pickle(data_params['embedding_file'])
+    embeddings_db, uuids_db = load_pickle(data_params['db_embedding_file'])
 
-    logger.info("START")
-    
-    
-    embeddings, uuids = load_pickle(data_params['embedding_file'])
-    # uuids = [int(id) for id in uuids]
-    # save_pickle((embeddings, uuids), data_params['embedding_file'])
-    # a=1/0
     #create db files
     
-    temp_db = lca_config.get('temp_db', False)
+    temp_db = ('temp_db' in lca_config) and lca_config['temp_db']
     
     if temp_db:
         logger.info(f"Using temp database...")
         db_path = tempfile.mkdtemp()
     else:
         db_path = os.path.join(lca_config['db_path'], config['exp_name'])
-        if ('clear_db' in lca_config) and lca_config['clear_db'] and os.path.exists(db_path):
-            logger.info("Removing old database...")
-            shutil.rmtree(db_path)
         os.makedirs(db_path, exist_ok=True)
-    
+        
 
     verifier_file =  os.path.join(str(db_path), "verifiers_probs.json")
     edge_db_file =  os.path.join(str(db_path), "quads.csv")
     clustering_file = os.path.join(str(db_path), "clustering.json")
     autosave_file = os.path.join(str(db_path), "autosave.json")
-    edge_graph_file = os.path.join(str(db_path), "edge_graph_file.json")
-    node2uuid_file = os.path.join(str(db_path), "node2uuid_file.json")
 
     lca_params['autosave_file'] = autosave_file
 
@@ -111,25 +100,38 @@ def run(config):
 
     name_keys = data_params['name_keys']
     filter_key = '__'.join(name_keys)
-    df = preprocess_data(data_params['annotation_file'], 
+    df_query = preprocess_data(data_params['annotation_file'], 
                         name_keys= name_keys,
                         convert_names_to_ids=True, 
                         viewpoint_list=data_params['viewpoint_list'], 
                         n_filter_min=data_params['n_filter_min'], 
                         n_filter_max=data_params['n_filter_max'],
                         images_dir = data_params['images_dir'], 
-                        embedding_uuids = uuids,
-                        format='old'
+                        embedding_uuids = uuids_query
+                    )
+
+    df_db = preprocess_data(data_params['db_annotation_file'], 
+                        name_keys= name_keys,
+                        convert_names_to_ids=True, 
+                        viewpoint_list=data_params['viewpoint_list'], 
+                        n_filter_min=data_params['n_filter_min'], 
+                        n_filter_max=data_params['n_filter_max'],
+                        images_dir = data_params['images_dir'], 
+                        embedding_uuids = uuids_db
                     )
     
-    print_intersect_stats(df, individual_key=filter_key)
+    print_intersect_stats(df_query, individual_key=filter_key)
+    print_intersect_stats(df_db, individual_key=filter_key)
 
    
    # create cluster validator
-    filtered_df = df[df['uuid_x'].isin(uuids)]
-    embeddings = [embeddings[uuids.index(uuid)] for uuid in filtered_df['uuid_x']]
+    filtered_df_query = df_query[df_query['uuid_x'].isin(uuids_query)]
+    filtered_df_db = df_query[df_db['uuid_x'].isin(uuids_db)]
+    filtered_df = pd.concat([filtered_df_query, filtered_df_db], ignore_index=True)
+    embeddings_query = [embeddings_query[uuids_query.index(uuid)] for uuid in filtered_df_query['uuid_x']]
+    embeddings_db = [embeddings_db[uuids_db.index(uuid)] for uuid in filtered_df_db['uuid_x']]
+    embeddings = embeddings_query + embeddings_db
     gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(filtered_df, filter_key)
-
 
 
     logger.info(f"Ground truth clustering: {gt_clustering}")
@@ -139,23 +141,25 @@ def run(config):
 
     # create embeddings verifier
     print(len(node2uuid.keys()))
-    print(len(embeddings))
+    print(len(embeddings_query))
+    print(len(embeddings_db))
     verifier_embeddings = Embeddings(embeddings, node2uuid, distance_power=lca_params['distance_power'])
-    verifier_edges = verifier_embeddings.get_edges()
+    db_edges = verifier_embeddings.get_edges(uuids_filter=set(uuids_db))
+    query_edges = verifier_embeddings.get_edges(uuids_filter=set(uuids_query))
     
 
 
-    topk_results = verifier_embeddings.get_stats(filtered_df, filter_key)
+    # topk_results = verifier_embeddings.get_stats(filtered_df_query, filter_key, db=filtered_df_db)
 
-    logger.info(f"Statistics: " + ", ".join([f"{k}: {100*v:.2f}%" for (k, v) in topk_results]))
+    # logger.info(f"Statistics: " + ", ".join([f"{k}: {100*v:.2f}%" for (k, v) in topk_results]))
    
 
     # create human reviewer
 
     prob_human_correct = lca_params['prob_human_correct']
         
-    human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
-    
+    human_reviewer = call_get_reviews(df_query, filter_key, prob_human_correct)
+    db_reviewer = call_get_reviews(df_db, filter_key, 1)
     
 
     #curate LCA
@@ -165,9 +169,7 @@ def run(config):
         cluster_data = {}
         verifier_name = lca_config['verifier_name']
         verifier_alg = call_verifier_alg(verifier_embeddings)
-        if lca_config.get('clear_db', False) and os.path.exists(autosave_file):
-            logger.info("Removing old autosave...")
-            os.remove(autosave_file)
+
         if os.path.exists(autosave_file):
             wgtrs_calib_dict = load_json(verifier_file)
             autosave_object = load_json(autosave_file)
@@ -178,36 +180,25 @@ def run(config):
         else:
             # generate wgtr calibration    
 
-            num_pos_needed = lca_params['num_pos_needed']
-            num_neg_needed = lca_params['num_neg_needed']
-            num_bins = 100
-            min_from_bin = 1
-            needed_total = 200#num_pos_needed + num_neg_needed
-            logger.info(f"Need total of {needed_total} reviews from {num_bins} bins with a minimum of {min_from_bin} samples from each bin")
-            human_reviewer = call_get_reviews(df, filter_key, 1)
-            # pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed, num_bins=2)
-            pos, neg, quit = generate_ground_truth_random(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
-            # pos, neg, quit = generate_wgtr_calibration_random_bins(verifier_edges, human_reviewer, needed_total, min_from_bin, num_bins=num_bins)
-            human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
+            reviews, _ = human_reviewer(db_edges)
+            pos = [edge for (edge, (_, _, review)) in zip(db_edges, reviews) if review]
+            neg = [edge for (edge, (_, _, review)) in zip(db_edges, reviews) if not review]
+
             logger.info(f"Num pos edges: {len(pos)}, num neg edges: {len(neg)}")
-            
-            pos, pos_outliers = remove_outliers(pos, 1, 1.5)
-            neg, neg_outliers = remove_outliers(neg, -1, 1.5)
+            pos, pos_outliers = remove_outliers(pos, 1)
+            neg, neg_outliers = remove_outliers(neg, -1)
             outliers = np.concatenate((pos_outliers, neg_outliers))
-            # logger.info(f"Len before filtering: {len(verifier_edges)}")
-            # verifier_edges = [edge for edge in verifier_edges if edge not in outliers]
-            # logger.info(f"Len after filtering: {len(verifier_edges)}")
+            logger.info(f"Len before filtering: {len(verifier_edges)}")
+            verifier_edges = [edge for edge in verifier_edges if edge not in outliers]
+            logger.info(f"Len after filtering: {len(verifier_edges)}")
             
-            if lca_config.get('verifier_file'):
-                wgtrs_calib_dict = load_json(lca_config['verifier_file'])
-            else:
-                wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
+            wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
 
             wgtrs = ga_driver.generate_weighters(
                 lca_params, wgtrs_calib_dict
             )
             wgtr = wgtrs[0] 
-            # save_pickle(wgtr, f"/ekaterina/work/src/lca/lca/tmp/wgtr_{exp_name}.pickle")
+            save_pickle(wgtr, "/ekaterina/work/src/lca/lca/tmp/wgtr_extexp_uns.pickle")
 
             # logger.info(f"positive edges to calibrate the weight function:")
 
@@ -227,34 +218,18 @@ def run(config):
             for a0, a1, s in verifier_edges:
                 logger.info(f"a0: {a0}, a1: {a1}, s:{s}, w:{wgtr.wgt(s)}")
                 all_edges_plot.append((a0, a1, s, wgtr.wgt(s), gt_node2cid[int(a0)]== gt_node2cid[int(a1)]))
-            # write_json(all_edges_plot, f"/ekaterina/work/src/lca/lca/tmp/initial_edges_{exp_name}.json")
-            get_histogram(all_edges_plot, wgtr, species, timestamp, wgtrs_calib_dict['miewid'])
+            write_json(all_edges_plot, "/ekaterina/work/src/lca/lca/tmp/initial_edges_extexp_uns.json")
         
             lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, clustering_file, current_clustering, lca_params)
             cluster_changes, is_finished = lca_object.curate(verifier_edges, human_reviews)
-        
-        edge_graph = lca_object.db.edge_graph
-        is_correct_edges = {(a0, a1): gt_node2cid[int(a0)]== gt_node2cid[int(a1)] for (a0, a1) in edge_graph.edges()} 
-        
-        nx.set_node_attributes(edge_graph, gt_node2cid, 'gt_cluster_id')
-        nx.set_node_attributes(edge_graph, lca_object.db.node_to_cid, 'cluster_id')
-        nx.set_edge_attributes(edge_graph, is_correct_edges , 'is_correct')
-        edge_graph = nx.relabel_nodes(edge_graph, lambda x: str(x))
 
-        edge_graph = nx.cytoscape_data(edge_graph)
-
-        
-        write_json(edge_graph, edge_graph_file)
         write_json(lca_object.db.clustering, clustering_file)
-        write_json(node2uuid, node2uuid_file)
         if is_finished and os.path.exists(autosave_file):
             os.remove(autosave_file)
     finally:
         if temp_db:
             shutil.rmtree(db_path)
-        for handler in logger.handlers[:]:
-            handler.flush()
-    return cluster_validator.gt_results, cluster_validator.r_results, node2uuid
+    return cluster_validator.gt_results, node2uuid
 
 
 def parse_args():

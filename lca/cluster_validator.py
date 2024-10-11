@@ -16,6 +16,8 @@ class ClusterValidator(object):
         self.gt_clustering = gt_clustering
         self.gt_node2cid = gt_node2cid
         self.prev_num_human = 0
+        self.gt_results = []
+        self.r_results = []
 
         
 
@@ -47,7 +49,7 @@ class ClusterValidator(object):
         return r_clustering, r_node2cid
 
 
-    def trace_start_human(self, clustering, node2cid, G):
+    def trace_start_human(self, clustering, node2cid, G, num_human=0):
             """
             Beging to record information about the number of human decisions
             vs. the accuracy of the current clustering.  The comparison is
@@ -61,17 +63,17 @@ class ClusterValidator(object):
             """
             info_text = 'Basic stats'
             result = self.incremental_stats(
-                0, clustering, node2cid, self.gt_clustering, self.gt_node2cid, info_text
+                num_human, clustering, node2cid, self.gt_clustering, self.gt_node2cid, info_text
             )
             self.gt_results = [result]
 
             r_clustering, r_node2cid = self.create_reachable(G)
             info_text = 'Reachable stats'
             result = self.incremental_stats(
-                0, r_clustering, r_node2cid, self.gt_clustering, self.gt_node2cid, info_text
+                num_human, clustering, node2cid, r_clustering, r_node2cid, info_text
             )
             self.r_results = [result]
-            self.prev_num_human = 0
+            self.prev_num_human = num_human
 
     def trace_iter_compare_to_gt(self, clustering, node2cid, num_human, G):
         if num_human <= self.prev_num_human:
@@ -84,16 +86,16 @@ class ClusterValidator(object):
         r_clustering, r_node2cid = self.create_reachable(G)
         info_text = 'Reachable stats'
         result = self.incremental_stats(
-            num_human, r_clustering, r_node2cid, self.gt_clustering, self.gt_node2cid, info_text
+            num_human, clustering, node2cid, r_clustering, r_node2cid, info_text
         )
         self.r_results.append(result)
         self.prev_num_human = num_human
 
 
     def incremental_stats(
-            self, num_human, clustering, node2cid, true_clustering, true_node2cid, info_text="Incremental stats:"
+            self, num_human, clustering, node2cid, true_clustering, true_node2cid, info_text="Incremental stats"
         ):
-        frac, prec, rec, per_size, non_equal_clustering = ct.percent_and_PR(
+        frac, prec, rec, per_size, non_equal_clustering, f1 = ct.percent_and_PR(
             clustering, node2cid, true_clustering, true_node2cid
         )
         result = {
@@ -104,9 +106,10 @@ class ClusterValidator(object):
             'precision': prec,
             'recall': rec,
             'error_rate': 1- frac,
+            'f1 score': f1,
             # 'per size': per_size,
             'non equal': non_equal_clustering,
-            'current clustering': clustering
+            # 'current clustering': clustering
         }
 
         logger.info(f'{info_text}: {json.dumps(result, indent=4, cls=SetEncoder)}')

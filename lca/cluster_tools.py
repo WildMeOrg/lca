@@ -464,16 +464,25 @@ def precision_recall(est, est_n2c, gt, gt_n2c):
                 if (ni not in est_n2c) or (nj not in est_n2c) or (est_n2c[ni] != est_n2c[nj]):
                     fn += 1
 
+    if tp + fp > 0:
+        precision = tp / (tp + fp)
+        recall = tp / (tp + fn)
 
-    precision = tp / (tp + fp)
-    recall = tp / (tp + fn)
-    return (precision, recall)
+        if precision + recall > 0:
+            f1_score = 2 * (precision * recall) / (precision + recall)
+        else:
+            f1_score = 0
+    else:
+        precision = 0
+        recall = 0
+        f1_score = 0
+    return (precision, recall, f1_score)
 
 
 def percent_and_PR(est, est_n2c, gt, gt_n2c):
     num_eq = count_equal_clustering(est, gt, gt_n2c)
     non_eq = get_nonequal_clustering(est, gt, gt_n2c)
-    pr, rec = precision_recall(est, est_n2c, gt, gt_n2c)
+    pr, rec, f1 = precision_recall(est, est_n2c, gt, gt_n2c)
     per_size = precision_recall_per_size(est, est_n2c, gt, gt_n2c)
     lng = len(est)
-    return (num_eq / lng, pr, rec, per_size, non_eq)
+    return (num_eq / lng, pr, rec, per_size, non_eq, f1)
