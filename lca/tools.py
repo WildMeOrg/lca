@@ -133,6 +133,7 @@ def generate_ga_params(config):
 
     should_densify_str = str(config['iterations'].get('should_densify', False)).lower()
     ga_params['should_densify'] = should_densify_str == 'true'
+    ga_params['densify_min_number_human'] = config['iterations']['densify_min_number_human']
 
     n = int(config['iterations'].get('densify_min_edges', 1))
     assert n >= 1

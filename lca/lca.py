@@ -113,6 +113,9 @@ class LCA(object):
         else:
             return -delta_w
 
+    def is_singleton(self):
+        return len(self.from_cids_sorted) == 1
+
     def add_edge(self, e):
         """
         Do not change weight here because the graph aliases the overall

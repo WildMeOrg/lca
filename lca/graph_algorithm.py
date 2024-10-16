@@ -387,6 +387,7 @@ class graph_algorithm(object):  # NOQA
             edges, or if the waiting list is empty, convergence.
             """
             a = self.queues.top_Q()
+            num_human = self.weight_mgr.num_human_decisions()
 
             # Step 2a: Apply the LCA if it improves the score:
             if a is not None and a.delta_score() > 0:
@@ -429,6 +430,17 @@ class graph_algorithm(object):  # NOQA
             elif (
                 a is not None
                 and self.params['min_delta_score_converge'] < a.delta_score()
+                and self.should_run_densify
+                and num_human >=  self.params["densify_min_number_human"]
+            ):
+                logger.info(f'ccPIC id is {self.ccpic_id}, Decision: run desnify top LCA delta is too low and empty waiting queue; will densify singletons'
+                )
+                self.densify_singletons()
+                self.should_run_densify = False
+
+            elif (
+                a is not None
+                and self.params['min_delta_score_converge'] < a.delta_score()
             ):
                 logger.info(f'ccPIC id is {self.ccpic_id}, Decision: augment graph from top LCA')
                 self.queues.pop_Q()
@@ -454,11 +466,11 @@ class graph_algorithm(object):  # NOQA
             # Step 2f: at this point, there are no active LCAs and no
             # LCAs are waiting for edges. The last possibility is to
             # densify the singleton LCAs. This is done at most once.
-            elif self.should_run_densify:
-                logger.info(f'ccPIC id is {self.ccpic_id}, Decision: top LCA delta is too low and empty waiting queue; will densify singletons'
-                )
-                self.densify_singletons()
-                self.should_run_densify = False
+            # elif self.should_run_densify:
+            #     logger.info(f'ccPIC id is {self.ccpic_id}, Decision: top LCA delta is too low and empty waiting queue; will densify singletons'
+            #     )
+            #     self.densify_singletons()
+            #     self.should_run_densify = False
 
             # Step 2g: At this point, all active LCAs are waiting, and
             # if there are none then the algorithm has converged!
@@ -483,7 +495,7 @@ class graph_algorithm(object):  # NOQA
                     self.G, self.clustering, self.node2cid, iter_num
                 )
 
-            num_human = self.weight_mgr.num_human_decisions()
+            
             if self.trace_iter_compare_to_gt_cb is not None:
                 self.trace_iter_compare_to_gt_cb(
                     self.clustering, self.node2cid, num_human, self.G
@@ -676,7 +688,7 @@ class graph_algorithm(object):  # NOQA
         because they will wait for new edges to be weighted.
         All other LCAs are eliminated (though not the actual clusters,
         of course).  After this, the priority queue and scoring queuue
-        should both be empty.
+        should both be empty.  FIX ME
         """
         prs_to_add = []
         lcas = self.queues.Q.get_all().copy()
@@ -684,11 +696,15 @@ class graph_algorithm(object):  # NOQA
         self.cid2lca.clear()
 
         for a in lcas:
+            if not a.is_singleton():  # need to write this method --- one liner
+                self.queues.add_to_Q(a)
+                continue
             to_add = a.densify_singleton(self.params)
             if len(to_add) > 0:
                 self.queues.add_to_W(a)
                 self.cid2lca.add(a)
                 prs_to_add.extend(to_add)
+    
         if len(prs_to_add) > 0:
             self.weight_mgr.request_new_weights(prs_to_add)
 
