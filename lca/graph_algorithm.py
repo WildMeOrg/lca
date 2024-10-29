@@ -364,9 +364,13 @@ class graph_algorithm(object):  # NOQA
         while (max_iterations is None or iter_num < max_iterations) and not (
             halt_requested or should_pause or converged
         ):
+            # if (iter_num >= 540 and iter_num <= 550) or (iter_num > 550 and iter_num % 100 == 0):
+            #     graph_algorithm.save_iteration_graph(iter_num)
             iter_num += 1
             logger.info('')
             logger.info('*** ccPIC id is %s, Iteration %d***' % (self.ccpic_id, iter_num))
+
+            
             
             if self.progress_cb is not None:
                 self.progress_cb(self, iter_num)
@@ -421,7 +425,7 @@ class graph_algorithm(object):  # NOQA
                 self.phase = 'stability'
                 self.queues.switch_to_stability()
                 self.new_lcas(
-                    self.clustering.keys(), use_pairs=True, use_singles=False
+                    self.clustering.keys(), use_pairs=True, use_singles=True
                 )  # singles will be kept
                 self.queues.info_long(max_entries=10)
 
@@ -483,6 +487,10 @@ class graph_algorithm(object):  # NOQA
             #  Check
             if not converged and not should_pause:
                 should_pause = self.check_wait_for_edges() or self.stop_request_check()
+                if len(self.weight_mgr.waiting_for) == 0:
+                    logger.info('Waiting for edges: <none>')
+                else:
+                    logger.info('Waiting for edges: %a' % self.weight_mgr.waiting_for)
 
             if should_pause and logger.getEffectiveLevel() <= logging.DEBUG:
                 if len(self.weight_mgr.waiting_for) == 0:
@@ -693,7 +701,7 @@ class graph_algorithm(object):  # NOQA
         prs_to_add = []
         lcas = self.queues.Q.get_all().copy()
         self.queues.Q.clear()
-        self.cid2lca.clear()
+        # self.cid2lca.clear()
 
         for a in lcas:
             if not a.is_singleton():  # need to write this method --- one liner
@@ -702,8 +710,10 @@ class graph_algorithm(object):  # NOQA
             to_add = a.densify_singleton(self.params)
             if len(to_add) > 0:
                 self.queues.add_to_W(a)
-                self.cid2lca.add(a)
+                # self.cid2lca.add(a)
                 prs_to_add.extend(to_add)
+            else:
+                self.queues.add_to_Q(a)
     
         if len(prs_to_add) > 0:
             self.weight_mgr.request_new_weights(prs_to_add)
