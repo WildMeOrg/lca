@@ -561,6 +561,15 @@ class graph_algorithm(object):  # NOQA
         self.new_lcas(new_cids, use_pairs, use_singles)
 
     def compute_lca_scores(self):
+        extra_prints = False
+        test_set = set([*range(51, 55), *range(56, 61), 347, 351])
+        for c in self.clustering.values():
+            # logger.info(f"{set(c)} == {set([*range(51, 55), *range(56, 61), 347, 351])}")
+            if set(c) == test_set:
+                extra_prints = True
+                break
+        if extra_prints:
+            logger.info("Printing relevant LCAs and scores:")
         lcas_for_scoring = self.queues.get_S()
         for a in lcas_for_scoring:
             if self.phase == 'scoring':
@@ -570,6 +579,9 @@ class graph_algorithm(object):  # NOQA
                     a.subgraph, a.from_cids(), a.from_node2cid()
                 )
             a.set_to_clusters(to_c, to_score)
+            if extra_prints:
+                if (test_set in a.from_clusters.values()) != (test_set in a.to_clusters.values()):
+                    logger.info(f"From: {a.from_clusters}, to: {a.to_clusters}, delta score: {a.to_score - a.from_score}")
         self.queues.add_to_Q(lcas_for_scoring)
         self.queues.clear_S()
 

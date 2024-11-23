@@ -115,15 +115,24 @@ class lca_queues(object):  # NOQA
         """
         if type(lcas) != list and type(lcas) != set:
             lcas = [lcas]
+        rW = 0
+        rS = 0
+        rQ = 0
+        rf = 0
         for a in lcas:
             if a in self.W:
+                rW += 1
                 self.W.remove(a)
             elif a in self.S:
+                rS += 1
                 self.S.remove(a)
             elif a in self.futile:
+                rf += 1
                 self.futile.remove(a)
             else:
+                rQ += 1
                 self.Q.remove(a)
+        # logger.info('Removed Q: %d S: %d W: %d futile: %d' % (rQ, rS, rW, rf))
 
     def reset_waiting(self):
         self.S |= self.W

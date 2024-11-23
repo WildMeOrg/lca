@@ -21,13 +21,15 @@ def get_objective(config_path):
     def objective(trial):
 
         config['lca']['distance_power'] = trial.suggest_categorical("distance_power", [0.5, 1, 2]) 
-        config['lca']['iterations']['min_delta_converge_multiplier'] = trial.suggest_float('min_delta_converge_multiplier', 0.8, 1, step=0.01) # 0.95 
+        config['lca']['iterations']['min_delta_converge_multiplier'] = trial.suggest_float('min_delta_converge_multiplier', 0.55, 5.55, step=0.1) # 0.95 
         config['lca']['iterations']['min_delta_stability_ratio'] = trial.suggest_int('min_delta_stability_ratio', 2, 12) # 4
         config['lca']['iterations']['num_per_augmentation'] = trial.suggest_int('num_per_augmentation', 1, 4) # 2
         config['lca']['iterations']['tries_before_edge_done'] = trial.suggest_int('tries_before_edge_done', 1, 8) # 4
         config['lca']['iterations']['ga_iterations_before_return'] = trial.suggest_int('ga_iterations_before_return', 4, 14) # 10
         config['lca']['iterations']['ga_max_num_waiting'] = trial.suggest_int('ga_max_num_waiting', 25, 100) # 50
- 
+        config['lca']['iterations']['densify_min_edges'] = trial.suggest_int('densify_min_edges', 1, 20) # 1
+        config['lca']['iterations']['densify_frac'] = trial.suggest_float('densify_frac', 0, 1) # 0
+
         gt_results, _, _ = run_lca(config)
         result = gt_results[-1]['f1 score']
 
@@ -39,7 +41,7 @@ def get_objective(config_path):
 
 
 def run_hyperopt():
-    config_path = './configs/config_plainszebra.yaml'
+    config_path = './configs/config_spermwhale.yaml'
 
     objective, config = get_objective(config_path)
 

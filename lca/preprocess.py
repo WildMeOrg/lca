@@ -40,6 +40,7 @@ def filter_viewpoint_df(df, viewpoint_list):
     return df
 
 def filter_uuids_df(df, uuids_list):
+    print(uuids_list)
     df = df[df['uuid_x'].isin(uuids_list)]
     print('     ', len(df), 'annotations remain after filtering by given uuids')
     return df

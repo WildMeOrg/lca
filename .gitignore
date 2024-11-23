@@ -12,8 +12,9 @@ lca/tmp/
 data/configs/
 !data/configs/config.yaml
 
+data/*
 lca/configs/
-lca/data/embeddings/
+lca/data/*
 lca/visualisations/
 !lca/configs/config_default.yaml
 

@@ -11,6 +11,7 @@ from init_logger import init_logger
 import tempfile
 import argparse
 import shutil
+import datetime
 
 
 
@@ -50,6 +51,14 @@ def run(config):
 
     lca_config = config['lca']
     data_params = config['data']
+    exp_name = config['exp_name']
+    
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if lca_config['logging'].get("update_log_file", True):
+        log_file_name = f"tmp/logs/{exp_name}_{timestamp}.log"
+        lca_config['logging']['log_file'] = log_file_name
+
     lca_params = generate_ga_params(lca_config)
     
     embeddings, uuids = load_pickle(data_params['embedding_file'])
@@ -63,12 +72,14 @@ def run(config):
     else:
         db_path = os.path.join(lca_config['db_path'], config['exp_name'])
         os.makedirs(db_path, exist_ok=True)
+    
         
 
     verifier_file =  os.path.join(str(db_path), "verifiers_probs.json")
     edge_db_file =  os.path.join(str(db_path), "quads.csv")
     clustering_file = os.path.join(str(db_path), "clustering.json")
     autosave_file = os.path.join(str(db_path), "autosave.json")
+    node2uuid_file = os.path.join(str(db_path), "node2uuid_file.json")
 
     lca_params['autosave_file'] = autosave_file
 
@@ -102,7 +113,7 @@ def run(config):
     # create embeddings verifier
     print(len(node2uuid.keys()))
     print(len(embeddings))
-    verifier_embeddings = Embeddings(embeddings, list(node2uuid.keys()), distance_power=lca_params['distance_power'])
+    verifier_embeddings = Embeddings(embeddings, node2uuid, distance_power=lca_params['distance_power'])
     verifier_edges = verifier_embeddings.get_edges()
 
     # create human reviewer
@@ -133,15 +144,17 @@ def run(config):
 
             num_pos_needed = lca_params['num_pos_needed']
             num_neg_needed = lca_params['num_neg_needed']
-            
-
-            pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
-            wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
+            if os.path.exists(verifier_file):
+                wgtrs_calib_dict = load_json(verifier_file)
+            else:
+                pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
+                wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
         
             lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, clustering_file, current_clustering, lca_params)
             cluster_changes, is_finished = lca_object.curate(verifier_edges, human_reviews)
 
         write_json(lca_object.db.clustering, clustering_file)
+        write_json(node2uuid, node2uuid_file)
         if is_finished and os.path.exists(autosave_file):
             os.remove(autosave_file)
     finally:

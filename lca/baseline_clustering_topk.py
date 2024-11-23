@@ -57,6 +57,9 @@ def baseline_clustering_topk(all_nodes, verifier_edges, human_reviewer, cluster_
         
     num_human : int
         The number of human verifications performed during the clustering process.
+
+
+    Take each query annotation 
     """
 
 

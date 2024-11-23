@@ -5,6 +5,7 @@ from run_baseline import run as run_baseline
 from run_baseline_topk import run_baseline_topk 
 from tools import *
 from init_logger import init_logger
+import argparse
 
 species = 'Beluga'
 x = 'num human'
@@ -25,6 +26,8 @@ def plot_metrics(probs_human_correct, all_results_lca, all_results_baseline_topk
 
     plt.figure()
     
+    max_x = 5000
+
     i = 0
     for (prob_human_correct, results_lca, results_baseline_topk, results_baseline_threshold) in zip(probs_human_correct, all_results_lca, all_results_baseline_topk, all_results_baseline_threshold):
         num_annots = len(results_lca[2])
@@ -53,7 +56,7 @@ def plot_metrics(probs_human_correct, all_results_lca, all_results_baseline_topk
         x_values_lca, y_values_lca = zip(*sorted_data_lca)
         x_values_baseline_topk, y_values_baseline_topk = zip(*sorted_data_baseline_topk)
         x_values_baseline_threshold, y_values_baseline_threshold = zip(*sorted_data_baseline_threshold)
-
+        max_x = max(max_x, x_values_lca[-1])
 
         if i==0:
             plt.plot(x_values_lca, y_values_lca, marker='o',  label=f'LCA', color=color_lca)
@@ -88,7 +91,7 @@ def plot_metrics(probs_human_correct, all_results_lca, all_results_baseline_topk
 
 
 
-    plt.xlim(right=5000)
+    plt.xlim(right=max_x)
     plt.ylim(0, 1.0) 
 
     plt.xlabel(xlabel)
@@ -105,7 +108,7 @@ def plot_metrics(probs_human_correct, all_results_lca, all_results_baseline_topk
 
     plt.savefig(f'{filename}.eps')
     plt.savefig(f'{filename}.png')
-
+    plt.close()
     # plt.show()
 
 def plot_clusters(probs_human_correct, all_results_lca, all_results_baseline_topk, all_results_baseline_threshold, config, ylabel="Clusters", species='default'):
@@ -116,8 +119,7 @@ def plot_clusters(probs_human_correct, all_results_lca, all_results_baseline_top
     color_lca = colors(0)            # Color for LCA
     color_baseline_topk = colors(1)   # Color for Baseline Top-k
     color_baseline_threshold = colors(2)
-    
-
+   
     for (prob_human_correct, results_lca, results_baseline_topk, results_baseline_threshold) in zip(probs_human_correct, all_results_lca, all_results_baseline_topk, all_results_baseline_threshold):
             
         if (prob_human_correct != 0.98):
@@ -175,7 +177,7 @@ def plot_clusters(probs_human_correct, all_results_lca, all_results_baseline_top
 
     plt.savefig(f'visualisations/clusters_{config["species"]}_{y}.eps', bbox_inches='tight')
     plt.savefig(f'visualisations/clusters_{config["species"]}_{y}.png', bbox_inches='tight')
-
+    plt.close()
     # plt.show()
 
 def plot(data_lca, data_baseline, x, y, save_path, xlabel=x, ylabel=y):
@@ -209,7 +211,7 @@ def plot(data_lca, data_baseline, x, y, save_path, xlabel=x, ylabel=y):
 
 
     plt.savefig(save_path)
-
+    plt.close()
 
     # plt.show()
 
@@ -281,6 +283,7 @@ def plot_per_cluster_size(species, config_path):
 
 
     plt.savefig('/home/kate/code/lca/lca/tmp/plots/giraffe_per_cluster_size.eps')
+    plt.close()
     # plt.show()
 
 # init_logger()
@@ -349,16 +352,18 @@ def plot_from_pickle(config_path, x, y,  xlabel="Number of human reviews", ylabe
 
 
 configs_with_species = [
-    # ('./configs/config_grevyszebra.yaml', 'Grevy\'s Zebra'),
+    ('./configs/config_grevyszebra.yaml', 'Grevy\'s Zebra'),
     ('./configs/config_plainszebra.yaml', 'Plains Zebra'),
-    # ('./configs/config_forestelephants.yaml', 'Forest Elephants'),
-    # # ('./configs/config_whaleshark.yaml', 'Whale Shark'),  # Uncomment if needed
-    # # ('./configs/config_giraffe.yaml', 'Giraffe'),
-    # ('./configs/config_beluga.yaml', 'Beluga Whale')
+    ('./configs/config_forestelephants.yaml', 'Forest Elephants'),
+    ('./configs/config_whaleshark.yaml', 'Whale Shark'),  # Uncomment if needed
+    ('./configs/config_giraffe.yaml', 'Giraffe'),
+    ('./configs/config_beluga.yaml', 'Beluga Whale')
+    # ('./configs/config_spermwhale.yaml', 'Spermwhale'),
 ]
 
 
-for config_path, species in configs_with_species:
+
+def run(config_path, species):
     plot_top(config_path, x='num human', y='precision', xlabel="Number of human reviews", ylabel='Precision', species=species)
     plot_from_pickle(config_path, x='num human', y='precision',  xlabel="Number of human reviews", ylabel='`Precision', species=species)
     plot_from_pickle(config_path, x='num human', y='f1 score',  xlabel="Number of human reviews", ylabel='`F1 score', species=species)
@@ -369,3 +374,30 @@ for config_path, species in configs_with_species:
     plot_from_pickle(config_path, x='num human', y='f1 score',  xlabel="Number of human reviews", ylabel='`F1 score', species=species, reachable=True)
     plot_from_pickle(config_path, x='num human', y='recall',  xlabel="Number of human reviews", ylabel='`Recall', species=species, reachable=True)
     plot_from_pickle(config_path, x='num human', y='frac correct',  xlabel="Number of human reviews", ylabel='% of correct clusters', species=species, reachable=True)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Load configuration file.")
+    parser.add_argument(
+        '--config',
+        type=str,
+        default='configs/default_config.yaml',
+        help='Path to the YAML configuration file. Default: configs/default_config.yaml'
+    )
+    parser.add_argument(
+        '--species',
+        type=str,
+        default='None',
+        help='species name'
+    )
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    init_logger()
+    args = parse_args()
+    config_path = args.config
+    species = args.species
+
+
+    run(config_path, species)

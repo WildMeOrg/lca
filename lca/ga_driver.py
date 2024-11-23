@@ -11,9 +11,11 @@ import edge_generator
 import exp_scores as es
 import extexp_scores as ees
 import gamma_scores as gs
-import kernel_density_scores
+import scores.kernel_density_scores as kernel_density_scores
 import graph_algorithm as ga
-import logistic_scores
+import scores.logistic_scores as logistic_scores
+import scores.isotonic_scores as isotonic_scores
+import scores.bayesian_scores as bayesian_scores
 import weighter
 from init_logger import get_formatter
 
@@ -204,6 +206,14 @@ def generate_weighters(ga_params, verifier_gt):
             )
         elif scorer == 'logistic':
             scorer = logistic_scores.logistic_scores.create_from_samples(
+                probs['gt_positive_probs'], probs['gt_negative_probs']
+            )
+        elif scorer == 'isotonic':
+            scorer = isotonic_scores.isotonic_scores.create_from_samples(
+                probs['gt_positive_probs'], probs['gt_negative_probs']
+            )
+        elif scorer == 'bayesian':
+            scorer = bayesian_scores.bayesian_scores.create_from_samples(
                 probs['gt_positive_probs'], probs['gt_negative_probs']
             )
         elif scorer == 'kde':

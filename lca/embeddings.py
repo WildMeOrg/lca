@@ -69,6 +69,44 @@ class Embeddings(object):
 
         return top1, top3, top5, top10
 
+
+    def get_top20_matches(self, df, filter_key):
+        def reduce_func(distmat, start):
+            distmat = 1 - self.get_score_from_cosine_distance(distmat)
+            # print(np.min(distmat), np.max(distmat))
+            # raise Exception("Sorry")
+            rng = np.arange(distmat.shape[0])
+            distmat[rng, rng+start] = np.inf
+            return distmat
+
+        start_time = time.time()
+        print("Calculating distances...")
+        print(f"{len(self.embeddings)}/{len(self.ids)}")
+        chunks = pairwise_distances_chunked(
+            self.embeddings, #     self.embeddings/norm(self.embeddings, axis=1).reshape((-1,1)), 
+            metric='cosine', #     metric=self.get_norm_embeddings_score,
+            reduce_func=reduce_func, n_jobs=-1)#, working_memory=4)
+        
+        distmat = np.concatenate(list(chunks), axis=0)
+        labels = [df.loc[df['uuid_x'] == self.uuids[id], filter_key].values[0] for id in self.ids]
+
+        top20_results = {}
+
+        for i, row in enumerate(distmat):
+            top20_indices = np.argsort(row)[:20]  # Get the top 20 closest indices
+            top20_scores = row[top20_indices]  # Get their corresponding scores
+
+            # Fetch the actual UUIDs corresponding to the indices
+            top20_uuids =[self.ids[idx] for idx in top20_indices]
+
+            # Build the dictionary for each UUID with top 20 matches and their scores
+            top20_results[self.ids[i]] = [(uuid, 1-score) for uuid, score in zip(top20_uuids, top20_scores)]
+        
+        print(f"Finished calculating distances in {time.time() - start_time:.2f} seconds.")
+        
+        return top20_results
+
+
     
     def get_edges(self, topk=5, target_edges=10000, uuids_filter=None):
         def reduce_func(distmat, start):

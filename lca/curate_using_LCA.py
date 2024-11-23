@@ -600,7 +600,7 @@ class curate_using_LCA(object):
 
                 
                 self.db.commit_cluster_changes(next_cluster_changes.cluster_changes, temporary=True)
-                logger.info(f'Cluster changes {next_cluster_changes.cluster_changes}')
+                # logger.info(f'Cluster changes {next_cluster_changes.cluster_changes}')
                 self.save_active_clusters(driver.active_clusters, self.db.latest_clustering)
 
                 # return (cluster_changes, False)
