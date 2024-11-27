@@ -1,7 +1,7 @@
 import numpy as np
 from preprocess import preprocess_data
-# from embeddings import Embeddings
-from synthetic_embeddings import SyntheticEmbeddings as Embeddings
+from embeddings import Embeddings
+from synthetic_embeddings import SyntheticEmbeddings #as Embeddings
 from curate_using_LCA import curate_using_LCA, generate_wgtr_calibration_ground_truth, generate_ground_truth_random, generate_wgtr_calibration_random_bins
 from tools import *
 import random
@@ -14,6 +14,8 @@ import argparse
 import shutil
 import datetime
 import networkx as nx
+import scores.kernel_density_scores as kernel_density_scores
+import weighter
 
 from graph_algorithm import graph_algorithm
 
@@ -56,6 +58,8 @@ def remove_outliers(pairs, sign=1, std_mult=2.5):
         filter = np.mean(scores) - scores > std_mult * np.std(scores)
     # filter = np.abs(scores - np.mean(scores)) < std_mult * np.std(scores)
     return np.array(pairs)[np.logical_not(filter)], np.array(pairs)[filter]
+
+
 
 def run(config):
     np.random.seed(42)
@@ -147,9 +151,10 @@ def run(config):
     print(len(node2uuid.keys()))
     print(len(embeddings))
     # verifier_embeddings = Embeddings(embeddings, node2uuid, distance_power=lca_params['distance_power'])
+    verifier_name = lca_config['verifier_name']
 
-    
-    verifier_embeddings = Embeddings(node2uuid, df, filter_key)
+    verifier_embeddings = Embeddings(embeddings, node2uuid, distance_power=lca_params['distance_power'])
+
     verifier_edges = verifier_embeddings.get_edges()
     
 
@@ -181,7 +186,6 @@ def run(config):
         current_clustering={}
         cluster_data = {}
         verifier_name = lca_config['verifier_name']
-        verifier_alg = call_verifier_alg(verifier_embeddings)
         if lca_config.get('clear_db', False) and os.path.exists(autosave_file):
             logger.info("Removing old autosave...")
             os.remove(autosave_file)
@@ -207,6 +211,40 @@ def run(config):
             # pos, neg, quit = generate_wgtr_calibration_random_bins(verifier_edges, human_reviewer, needed_total, min_from_bin, num_bins=num_bins)
             human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
             logger.info(f"Num pos edges: {len(pos)}, num neg edges: {len(neg)}")
+
+            scorer = kernel_density_scores.kernel_density_scores.create_from_samples(
+                pos, neg
+            )
+
+            synthetic_embeddings = SyntheticEmbeddings(node2uuid, df, filter_key, lambda: scorer.density_pos.sample().item(), lambda: scorer.density_neg.sample().item())
+
+            wgtr = weighter.weighter(scorer, 1)
+            real_outliers = 0
+            synth_outliers = 0
+            pos_real = []
+            neg_real = []
+            pos_synth = []
+            neg_synth = []
+            for i, id1 in enumerate(synthetic_embeddings.ids):
+                for j, id2 in enumerate(synthetic_embeddings.ids):
+                    if i < j:  
+                        positive = synthetic_embeddings.labels[id1] == synthetic_embeddings.labels[id2]
+                        synth_score = (synthetic_embeddings.get_score(id1, id2))
+                        real_score = (verifier_embeddings.get_score(id1, id2))
+                        if positive:
+                            pos_real.append(real_score)
+                            pos_synth.append(synth_score)
+                        else:
+                            neg_real.append(real_score)
+                            neg_synth.append(synth_score)
+            logger.info(f"Sunthetic positives:", neg_synth)
+            get_pos_neg_histogram(pos_real, neg_real, wgtr, species, timestamp, "real")
+            get_pos_neg_histogram(pos_synth, neg_synth, wgtr, species, timestamp, "synthetic")
+
+
+            # if 'synthetic' in lca_params['aug_names']:
+            verifier_alg = call_verifier_alg(synthetic_embeddings)
+            # verifier_alg = call_verifier_alg(verifier_embeddings)
             
             # pos, pos_outliers = remove_outliers(pos, 1, 1.5)
             # neg, neg_outliers = remove_outliers(neg, -1, 1.5)

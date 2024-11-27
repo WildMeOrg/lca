@@ -72,6 +72,15 @@ class weight_manager(object):  # NOQA
             logger.info('Error:  Augmentation function name %s is unknown' % (name,))
             assert False
 
+    def _name_to_index_nothrow(self, name):
+        """
+        Find the index of the augmentation name in the list. Return -1 if it is not there.
+        """
+        try:
+            return self.aug_names.index(name)
+        except ValueError:
+            return -1
+
     def get_initial_edges(self, labeled_edges):
         """
         Given a sequence of labeled edges, each in the form
@@ -95,8 +104,11 @@ class weight_manager(object):  # NOQA
             if aug == 'zero':
                 ret_edges[pr] += 0
             else:
-                i = self._name_to_index(aug)
-                ac = self.augment_count[pr]
+                i = self._name_to_index_nothrow(aug)
+                if i == -1:
+                    ac = [0]
+                else:
+                    ac = self.augment_count[pr]
                 if (ac[i] == 0) or (i == self.num_names - 1):
                     ac[i] += 1
                     ret_edges[pr] += w
