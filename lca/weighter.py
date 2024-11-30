@@ -3,7 +3,7 @@ import logging
 import math as m
 import random
 import numpy as np
-import exp_scores as es
+import scores.exp_scores as es
 
 #  Need to add weight according to verifier names!!!
 

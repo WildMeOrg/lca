@@ -8,9 +8,9 @@ import cluster_tools as ct
 import compare_clusterings
 import db_interface_sim
 import edge_generator
-import exp_scores as es
-import extexp_scores as ees
-import gamma_scores as gs
+import scores.exp_scores as es
+import scores.extexp_scores as ees
+import scores.gamma_scores as gs
 import scores.kernel_density_scores as kernel_density_scores
 import graph_algorithm as ga
 import scores.logistic_scores as logistic_scores

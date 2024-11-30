@@ -210,6 +210,44 @@ def print_intersect_stats(df,individual_key="name"):
     logger.info(f" ---- number of singletons: {single_annotation_count}")
 
 
+def get_pos_neg_histogram(pos, neg, wgtr, species, timestamp, label):
+    plt.figure()
+
+    # print(pos)
+    pos_weights = [wgtr.wgt(x)/10 for x in pos]
+    neg_weights = [wgtr.wgt(x)/10 for x in neg]
+ 
+
+    # plt.hist(pos_scores_filtered, bins=35, density=True, alpha=0.6, color='g')
+    # plt.hist(neg_scores_filtered, bins=35, density=True, alpha=0.6, color='r')
+    plt.hist(pos, bins=35, density=True, alpha=0.6, color='g')
+    plt.hist(neg, bins=35, density=True, alpha=0.6, color='r')
+    # plt.hist(wgtrs_calib_dict['gt_negative_probs'], bins=35, density=True, alpha=0.6, color='r')
+    # plt.hist(wgtrs_calib_dict['gt_positive_probs'], bins=35, density=True, alpha=0.6, color='g')
+
+
+    # plt.hist(ss, bins=35, density=True, alpha=0.6, color='b')
+
+    xs = np.linspace(0, 1, 100)
+
+    pos_ys = [wgtr.scorer.get_pos_neg(x)[0] for x in xs]
+    neg_ys = [wgtr.scorer.get_pos_neg(x)[1] for x in xs]
+
+
+    plt.plot(xs, pos_ys, color='g')
+    plt.plot(xs, neg_ys, color='r')
+
+
+    # wgtr = weighter.weighter(scorer, config["lca"]["edge_weights"]['prob_human_correct'])
+    wgtr.max_weight = 10
+    
+    plt.plot(xs, [wgtr.wgt_smooth(x) for x in xs], 'k-')
+
+    plt.xlabel("Score")
+    plt.ylabel("Probability density function")
+    plt.title(species)
+
+    plt.savefig(f'/ekaterina/work/src/lca/lca/visualisations/{species}_{timestamp}_{label}.png')
 
 def get_histogram(initial_edges, wgtr, species, timestamp, wgtrs_calib_dict):
     plt.figure()
