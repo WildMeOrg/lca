@@ -1,8 +1,10 @@
 import numpy as np
 from preprocess import preprocess_data
-# from embeddings import Embeddings
-from synthetic_embeddings import SyntheticEmbeddings as Embeddings
-from curate_using_LCA import curate_using_LCA, generate_wgtr_calibration_ground_truth, generate_ground_truth_random, generate_wgtr_calibration_random_bins
+from embeddings import Embeddings
+from binary_embeddings import BinaryEmbeddings
+from random_embeddings import RandomEmbeddings
+# from synthetic_embeddings import SyntheticEmbeddings as Embeddings
+from curate_using_LCA import curate_using_LCA, generate_wgtr_calibration_ground_truth, generate_ground_truth_random, generate_calib_weights
 from tools import *
 import random
 import os
@@ -17,23 +19,17 @@ import networkx as nx
 
 from graph_algorithm import graph_algorithm
 
-def save_probs_to_db(pos, neg, output_path, method='miewid'):
+def save_probs_to_db(data, output_path):
     dir_name = os.path.dirname(output_path)
     
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
     
-    data = {
-        method: {
-            "gt_positive_probs": [p.item() for _, _, p in pos],
-            "gt_negative_probs": [p.item() for _, _, p in neg]
-        }
-    }
     
     with open(output_path, 'w') as f:
         json.dump(data, f, indent=2)
 
-    return data
+    return 
 
 def call_verifier_alg(embeddings):
     def verifier_alg(edge_nodes):
@@ -57,6 +53,28 @@ def remove_outliers(pairs, sign=1, std_mult=2.5):
     # filter = np.abs(scores - np.mean(scores)) < std_mult * np.std(scores)
     return np.array(pairs)[np.logical_not(filter)], np.array(pairs)[filter]
 
+
+def process_verifier_edges(method, edges, human_reviewer, num_pos_needed, num_neg_needed, logger):
+    """Generate ground truth random data and update the calibration dictionary."""
+    pos, neg, quit = generate_ground_truth_random(edges, human_reviewer, num_pos_needed, num_neg_needed)
+    logger.info(f"Method: {method}, Num pos edges: {len(pos)}, num neg edges: {len(neg)}")
+    return {
+        "gt_positive_probs": [p.item() for _, _, p in pos],
+        "gt_negative_probs": [p.item() for _, _, p in neg],
+    }, pos, neg
+
+
+def process_edges(method, pos_edges, neg_edges, get_score, logger):
+    """Generate ground truth random data and update the calibration dictionary."""
+    pos, neg = generate_calib_weights(pos_edges, neg_edges, get_score)
+    logger.info(f"Method: {method}, Num pos edges: {len(pos)}, num neg edges: {len(neg)}")
+    print(pos)
+    return {
+        "gt_positive_probs": [p for _, _, p in pos],
+        "gt_negative_probs": [p for _, _, p in neg],
+    }
+
+    
 def run(config):
     np.random.seed(42)
     random.seed(42)
@@ -146,10 +164,16 @@ def run(config):
     # create embeddings verifier
     print(len(node2uuid.keys()))
     print(len(embeddings))
-    # verifier_embeddings = Embeddings(embeddings, node2uuid, distance_power=lca_params['distance_power'])
+    embeddings_dict = {
+        'miewid': Embeddings(embeddings, node2uuid, distance_power=lca_params['distance_power']),
+        'binary': BinaryEmbeddings(node2uuid, df, filter_key),
+        'random': RandomEmbeddings()
+    }
+    verifiers_dict = {ver_name: call_verifier_alg(embeddings_dict[ver_name]) for ver_name in embeddings_dict.keys()}
+    verifier_embeddings = embeddings_dict[lca_config['verifier_name']]
 
     
-    verifier_embeddings = Embeddings(node2uuid, df, filter_key)
+    # verifier_embeddings = Embeddings(node2uuid, df, filter_key)
     verifier_edges = verifier_embeddings.get_edges()
     
 
@@ -206,7 +230,6 @@ def run(config):
             pos, neg, quit = generate_ground_truth_random(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
             # pos, neg, quit = generate_wgtr_calibration_random_bins(verifier_edges, human_reviewer, needed_total, min_from_bin, num_bins=num_bins)
             human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
-            logger.info(f"Num pos edges: {len(pos)}, num neg edges: {len(neg)}")
             
             # pos, pos_outliers = remove_outliers(pos, 1, 1.5)
             # neg, neg_outliers = remove_outliers(neg, -1, 1.5)
@@ -218,13 +241,29 @@ def run(config):
             if lca_config.get('verifier_file'):
                 wgtrs_calib_dict = load_json(lca_config['verifier_file'])
             else:
-                wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file, method=verifier_name)
+                wgtrs_calib_dict = {}
+                
+                gt_weights, pos_edges, neg_edges = process_verifier_edges(verifier_name, verifier_edges, human_reviewer, num_pos_needed, num_neg_needed,  logger)
+                wgtrs_calib_dict[verifier_name] = gt_weights
+                
+                for method in lca_params['aug_names']:
+                    if method in {'human', verifier_name}:  # Skip 'human' and verifier itself
+                        continue
+
+                    if method not in embeddings_dict:
+                        logger.warning(f"Embeddings for method {method} not found.")
+                        continue
+
+                    get_score = embeddings_dict[method].get_score
+                    wgtrs_calib_dict[method] = process_edges(method, pos_edges, neg_edges, get_score, logger)
+                    
+                save_probs_to_db(wgtrs_calib_dict, verifier_file)
 
             wgtrs = ga_driver.generate_weighters(
                 lca_params, wgtrs_calib_dict
             )
-            wgtr = wgtrs[0] 
-            save_pickle(wgtr, f"/ekaterina/work/src/lca/lca/tmp/wgtr_{exp_name}.pickle")
+            # wgtr = wgtrs[0] 
+            save_pickle(wgtrs, f"/ekaterina/work/src/lca/lca/tmp/wgtr_{exp_name}.pickle")
 
             # logger.info(f"positive edges to calibrate the weight function:")
 
@@ -240,14 +279,14 @@ def run(config):
             logger.info(f"initial edges:")
 
             all_edges_plot = []
-
-            for a0, a1, s in verifier_edges:
-                logger.info(f"a0: {a0}, a1: {a1}, s:{s}, w:{wgtr.wgt(s)}")
-                all_edges_plot.append((a0, a1, s, wgtr.wgt(s), gt_node2cid[int(a0)]== gt_node2cid[int(a1)]))
-            write_json(all_edges_plot, f"/ekaterina/work/src/lca/lca/tmp/initial_edges_{exp_name}.json")
-            get_histogram(all_edges_plot, wgtr, species, timestamp, wgtrs_calib_dict[verifier_name])
+            if verifier_name in wgtrs.keys():
+                for a0, a1, s in verifier_edges:
+                    logger.info(f"a0: {a0}, a1: {a1}, s:{s}, w:{wgtrs[verifier_name].wgt(s)}")
+                    all_edges_plot.append((a0, a1, s, wgtrs[verifier_name].wgt(s), gt_node2cid[int(a0)]== gt_node2cid[int(a1)]))
+                write_json(all_edges_plot, f"/ekaterina/work/src/lca/lca/tmp/initial_edges_{exp_name}.json")
+                get_histogram(all_edges_plot, wgtrs[verifier_name], species, timestamp, wgtrs_calib_dict[verifier_name])
         
-            lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, clustering_file, current_clustering, lca_params)
+            lca_object = curate_using_LCA(verifiers_dict, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, clustering_file, current_clustering, lca_params)
             
             def save_iteration_graph(iteration):
                 edge_graph = lca_object.db.edge_graph
@@ -263,8 +302,12 @@ def run(config):
                 edge_graph_file = os.path.join(str(db_path), f"edge_graph_file_iter_{iteration}.json")
                 write_json(edge_graph, edge_graph_file)
             graph_algorithm.save_iteration_graph = save_iteration_graph
-            
+            verifier_edges = [
+                (n0, n1, s, verifier_name)
+                for n0, n1, s in verifier_edges
+            ]
             cluster_changes, is_finished = lca_object.curate(verifier_edges, human_reviews)
+            embeddings_dict["binary"].final_print()
         
         
 

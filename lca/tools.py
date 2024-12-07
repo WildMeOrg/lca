@@ -96,7 +96,7 @@ def generate_ga_params(config):
     assert 0 < phc <= 1
     ga_params['prob_human_correct'] = phc
     s = config['edge_weights']['augmentation_names']
-    ga_params['aug_names'] = s.strip().split()
+    ga_params['aug_names'] = s
 
     ga_params['num_pos_needed'] = config['edge_weights']['num_pos_needed']
     ga_params['num_neg_needed'] = config['edge_weights']['num_neg_needed']

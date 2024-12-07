@@ -19,16 +19,17 @@ class weighter(object):  # NOQA
     the weights. Specifically, the human_prob -> max_weight and
     nothing can be outside the range -max_weight to max_weight
     """
-
+    max_weight = 100
+    incomparable_weight = 0
     def __init__(self, scorer, human_prob=0.98):
         self.scorer = scorer
         self.human_prob = human_prob
-        self.incomparable_weight = 0
-        self.max_weight = 100  # should not change
+        # self.incomparable_weight = 0
+        # self.max_weight = 100  # should not change
         self.max_raw_weight = self.scorer.raw_wgt_(human_prob)
         logger.info(
             'Built weighter with human_prob %1.2f and max_weight %d'
-            % (self.human_prob, self.max_weight)
+            % (self.human_prob, 100)
         )
 
     def wgt(self, score):
@@ -45,15 +46,13 @@ class weighter(object):  # NOQA
         w = w0 / self.max_raw_weight * self.max_weight
         return w
 
-    def human_wgt(self, is_marked_correct):
+    @staticmethod
+    def human_wgt(is_marked_correct):
         """Given a human decision, produce a weight"""
         if is_marked_correct is None:
-            return self.incomparable_weight
+            return weighter.incomparable_weight
 
-        if is_marked_correct:
-            return self.max_weight
-        else:
-            return -self.max_weight
+        return weighter.max_weight if is_marked_correct else -weighter.max_weight
 
     def random_wgt(self, is_match_correct):
         """Generate a random weight depending on whether or not the

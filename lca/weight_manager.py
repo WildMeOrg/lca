@@ -94,6 +94,8 @@ class weight_manager(object):  # NOQA
                 pr = (n1, n0)
             if aug == 'zero':
                 ret_edges[pr] += 0
+            elif aug not in self.aug_names:
+                ret_edges[pr] += w
             else:
                 i = self._name_to_index(aug)
                 ac = self.augment_count[pr]

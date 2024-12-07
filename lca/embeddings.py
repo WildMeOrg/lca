@@ -27,8 +27,11 @@ class Embeddings(object):
     def get_embeddings_score(self, embedding1, embedding2):
         return self.get_score_from_cosine_distance(cosine(embedding1, embedding2))
     
+    def sign_power(self, x, power):
+        return np.sign(x) * np.power(np.abs(x), power)
+    
     def get_score_from_cosine_distance(self, cosine_dist):
-        return np.power(1 - cosine_dist*0.5, self.distance_power)
+        return 1 - self.sign_power(cosine_dist, self.distance_power)*0.5
         # return np.power(np.maximum(0, 1 - cosine_dist), self.distance_power
 
     def get_topk_acc(self, labels_q, labels_db, dists, topk):

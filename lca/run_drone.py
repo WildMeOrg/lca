@@ -151,6 +151,12 @@ def run(config):
                 wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
         
             lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, clustering_file, current_clustering, lca_params)
+            
+            verifier_edges = [
+                (n0, n1, s, verifier_name)
+                for n0, n1, s in verifier_edges
+            ]
+            
             cluster_changes, is_finished = lca_object.curate(verifier_edges, human_reviews)
 
         write_json(lca_object.db.clustering, clustering_file)

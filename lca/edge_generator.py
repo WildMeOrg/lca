@@ -4,7 +4,9 @@
 # import weighter
 import logging
 
+from weighter import weighter
 
+import numpy as np
 logger = logging.getLogger('lca')
 
 
@@ -22,7 +24,8 @@ class edge_generator(object):  # NOQA
         if vn == 'zero':
             return 0
         else:
-            return self.wgtr.wgt(p)
+            # logger.info(f"Score {p}")
+            return self.wgtr[vn].wgt(np.array(p).item())
 
     def new_edges_from_verifier(self, verifier_quads, db_add=True):
         edge_quads = [
@@ -35,7 +38,7 @@ class edge_generator(object):  # NOQA
 
     def new_edges_from_human(self, human_triples):
         edge_quads = [
-            (n0, n1, self.wgtr.human_wgt(b), 'human') for n0, n1, b in human_triples
+            (n0, n1, weighter.human_wgt(b), 'human') for n0, n1, b in human_triples
         ]
         self.db.add_edges(edge_quads)
         return edge_quads

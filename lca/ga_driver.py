@@ -188,8 +188,8 @@ def set_validator_functions(trace_start_human_f, trace_iter_compare_to_gt_f):
 
 
 def generate_weighters(ga_params, verifier_gt):
-    wgtrs = []
-    for aug in ga_params['aug_names']:
+    wgtrs = {}
+    for aug in verifier_gt.keys():#ga_params['aug_names']:
         if aug == 'human':
             continue
         assert aug in verifier_gt
@@ -226,9 +226,12 @@ def generate_weighters(ga_params, verifier_gt):
             )
         
         wgtr = weighter.weighter(scorer, ga_params['prob_human_correct'])
-        wgtrs.append(wgtr)
+        # if aug == "miewid":
+        #     logger.info("Clipped miewid weights")
+        #     wgtr.max_raw_weight = 1.5 * wgtr.max_raw_weight
+        wgtrs[aug] = wgtr
 
-    if len(wgtrs) == 0:
+    if len(wgtrs.keys()) == 0:
         default_np_ratio = 1.0
         default_error_frac = 0.1
         logger.info('No augmentation methods provided so using only human decisions')
@@ -241,7 +244,7 @@ def generate_weighters(ga_params, verifier_gt):
             default_error_frac, default_np_ratio
         )
         wgtr = weighter.weighter(scorer, ga_params['prob_human_correct'])
-        wgtrs.append(wgtr)
+        wgtrs['default'] = wgtr
     return wgtrs
 
 

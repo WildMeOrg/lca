@@ -7,6 +7,7 @@ import csv
 import pandas as pd
 import random
 import logging
+from weighter import weighter
 from tools import *
 from ga_driver import IterationHalt, IterationPause, IterationConverged
 from sklearn.linear_model import LogisticRegression
@@ -111,9 +112,8 @@ def is_aug_name_human(aug_name):
 
 
 class edge_generator_generic(edge_generator.edge_generator):  # NOQA
-    def __init__(self, db, wgtr, verifier_alg, verifier_name):
-        self.verifier_alg = verifier_alg
-        self.verifier_name = verifier_name
+    def __init__(self, db, wgtr, verifiers):
+        self.verifiers = verifiers
         super(edge_generator_generic, self).__init__(db, wgtr)
 
     def get_edge_requests(self):
@@ -133,24 +133,16 @@ class edge_generator_generic(edge_generator.edge_generator):  # NOQA
         as results for LCA to grab. Requests for human reviews are saved for sending
         to the web interface
         """
-        requested_verifier_edges = []  # Requests for verifier
+        verifier_quads = []  # Requests for verifier
         human_review_requests = []  # Requests for human review
         for edge in self.get_edge_requests():
             n0, n1, aug_name = edge
             if is_aug_name_algo(aug_name):
-                requested_verifier_edges.append((n0, n1))
+                verifier_quads.append((n0, n1, self.verifiers[aug_name]([(n0, n1)]), aug_name))
             else:
                 human_review_requests.append(edge)
 
-        # Get edge scores (probabilities) from the verifier
-        scores = self.verifier_alg(requested_verifier_edges)
-
-        # Convert these scores/probabilities to quads
-        verifier_quads = [
-            (e[0], e[1], s, self.verifier_name)
-            for e, s in zip(requested_verifier_edges, scores)
-        ]
-
+        
         # Convert the quads to edge weight quads; while doing so, add
         # to the database.
         wgt_quads = self.new_edges_from_verifier(verifier_quads)
@@ -373,6 +365,22 @@ def generate_ground_truth_random(verifier_edges,
 
     return pos_triples, neg_triples, quit_lca
 
+
+def generate_calib_weights(pos, neg, get_score):
+
+    pos_result = []
+    neg_result = []
+
+    for n0, n1, _ in pos:
+        e = (n0, n1, get_score(n0, n1))
+        pos_result.append(e)
+
+    for n0, n1, _ in neg:
+        e = (n0, n1, get_score(n0, n1))
+        neg_result.append(e)
+    
+    return pos_result, neg_result
+
 def generate_wgtr_calibration_random_bins(verifier_edges,
                                            human_reviewer,
                                            needed_total,
@@ -483,16 +491,16 @@ cluster_ids_to_check:
 """
 class curate_using_LCA(object):
     def __init__(self,
-                 verifier_alg,
-                 verifier_name,
+                 verifier_algs,
+                 verifier_names,
                  human_reviewer,
                  wgtrs_calib_dict,
                  edge_db_file,
                  clustering_file, #maybe comes from db file
                  current_clustering,
                  lca_config):
-        self.verifier_alg = verifier_alg
-        self.verifier_name = verifier_name
+        self.verifier_algs = verifier_algs
+        self.verifier_names = verifier_names
         self.human_reviewer = human_reviewer
         self.wgtrs_calib_dict = wgtrs_calib_dict
         self.lca_config = lca_config
@@ -502,17 +510,16 @@ class curate_using_LCA(object):
 
         # 1. Create weighter from calibration
 
-        wgtrs = ga_driver.generate_weighters(
+        self.wgtrs = ga_driver.generate_weighters(
             self.lca_config, self.wgtrs_calib_dict
         )
-        self.wgtr = wgtrs[0]    # In the future we can consider muliple algorithms
-
+        
         # 2. Update delta score thresholds in the lca config
         # This should probably be in a LCA-proper file
         multiplier = self.lca_config['min_delta_converge_multiplier']
         ratio = self.lca_config['min_delta_stability_ratio']
-        human_gt_positive_weight = self.wgtr.human_wgt(is_marked_correct=True)
-        human_gt_negative_weight = self.wgtr.human_wgt(is_marked_correct=False)
+        human_gt_positive_weight = weighter.human_wgt(is_marked_correct=True)
+        human_gt_negative_weight = weighter.human_wgt(is_marked_correct=False)
         human_gt_delta_weight = human_gt_positive_weight - human_gt_negative_weight
         convergence = -1.0 * multiplier * human_gt_delta_weight
         stability = convergence / ratio
@@ -523,7 +530,7 @@ class curate_using_LCA(object):
         self.db = db_interface_generic(self.edge_db_file, self.clustering_file, self.current_clustering)
 
         # 4. Create the edge generators
-        self.edge_gen = edge_generator_generic(self.db, self.wgtr, self.verifier_alg, self.verifier_name)
+        self.edge_gen = edge_generator_generic(self.db, self.wgtrs, self.verifier_algs)
     
     def save_active_clusters(self, active_clusters, clustering):
         autosave_file = self.lca_config['autosave_file']
@@ -544,10 +551,10 @@ class curate_using_LCA(object):
         #  This is not necessary for the human reviews.
 
         logger = logging.getLogger('lca')
-        verifier_results = [
-            (n0, n1, s, self.verifier_name)
-            for n0, n1, s in verifier_results
-        ]
+        # verifier_results = [
+        #     (n0, n1, s, self.verifier_name)
+        #     for n0, n1, s in verifier_results
+        # ]
 
         #  Create the graph algorithm driver. This requires that at least one
         #  of verifier_results, human_reviews and cluster_ids_to_check be 
