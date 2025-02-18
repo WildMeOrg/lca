@@ -6,24 +6,23 @@ from scipy.spatial.distance import cosine
 from sklearn.metrics import pairwise_distances, pairwise_distances_chunked
 from sklearn.metrics.pairwise import cosine_similarity
 import sklearn
+from sklearn.mixture import GaussianMixture
 
 
 class SyntheticEmbeddings(object):
     def __init__(self,
-                 ids, df, filter_key):
+                 ids, df, 
+                 filter_key,
+                 sample_positive,
+                 sample_negative):
         self.uuids = ids
         self.ids = list(ids.keys())
         self.labels = [df.loc[df['uuid_x'] == self.uuids[id], filter_key].values[0] for id in self.ids]
-        self.rng = np.random.default_rng()
+        self.generate_positive_score = sample_positive
+        self.generate_negative_score = sample_negative
+
         self.scores = self.generate_scores()
 
-    def generate_positive_score(self):
-        return self.rng.normal(0.65, 0.15) + self.rng.random()*0.02
-        # return np.random.normal(0.7, 0.15)
-    
-    def generate_negative_score(self):
-        return self.rng.normal(0.35, 0.15) + self.rng.random()*0.02
-        # return np.random.normal(0.3, 0.15)
     
     def generate_scores(self):
         self.scores = {}
@@ -31,10 +30,14 @@ class SyntheticEmbeddings(object):
             for j, id2 in enumerate(self.ids):
                 if i < j:  
                     negative = self.labels[id1] != self.labels[id2]
-                    if negative:
-                        self.scores[(id1, id2)] = np.clip(self.generate_negative_score(), 0, 1)
-                    else:
-                        self.scores[(id1, id2)] = np.clip(self.generate_positive_score(), 0, 1)
+                    self.scores[(id1, id2)] = -1
+                    while self.scores[(id1, id2)] < 0 or self.scores[(id1, id2)] > 1:
+                        if negative:
+                            self.scores[(id1, id2)] = self.generate_negative_score()
+                        else:
+                            self.scores[(id1, id2)] = self.generate_positive_score()
+                    # if self.scores[(id1, id2)] > 1:
+                    #     print(f"{not negative}: {self.scores[(id1, id2)]}")
                 elif i == j:
                     self.scores[(id1, id2)] = 1  
         return self.scores
@@ -148,6 +151,5 @@ class SyntheticEmbeddings(object):
 
     def get_baseline_edges(self, topk=10, distance_threshold=0.5):
         raise NotImplemented()
-
 
 

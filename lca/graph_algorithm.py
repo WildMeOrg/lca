@@ -13,6 +13,8 @@ import lca_queues
 import logging
 import weight_manager as wm
 
+from weighter import weighter
+import numpy as np
 
 logger = logging.getLogger('lca')
 
@@ -395,6 +397,14 @@ class graph_algorithm(object):  # NOQA
 
             # Step 2a: Apply the LCA if it improves the score:
             if a is not None and a.delta_score() > 0:
+                # to_weights = list(a.to_weights.values())
+                # small_weights, edges = a.average_change_weight()
+                # if small_weights:
+                #     logger.info(f"Got LCA with low mean weights: {edges}")
+                #     self.should_run_densify = True
+                #     self.weight_mgr.request_new_weights(edges)
+                #     should_pause = True
+                # else:
                 logger.info('Decision: apply LCA')
                 # Note: no need to explicitly remove a from the top of
                 # the heap because this is done during the replacement
@@ -561,15 +571,15 @@ class graph_algorithm(object):  # NOQA
         self.new_lcas(new_cids, use_pairs, use_singles)
 
     def compute_lca_scores(self):
-        extra_prints = False
-        test_set = set([*range(51, 55), *range(56, 61), 347, 351])
-        for c in self.clustering.values():
-            # logger.info(f"{set(c)} == {set([*range(51, 55), *range(56, 61), 347, 351])}")
-            if set(c) == test_set:
-                extra_prints = True
-                break
-        if extra_prints:
-            logger.info("Printing relevant LCAs and scores:")
+        # extra_prints = False
+        # test_set = set([*range(51, 55), *range(56, 61), 347, 351])
+        # for c in self.clustering.values():
+        #     # logger.info(f"{set(c)} == {set([*range(51, 55), *range(56, 61), 347, 351])}")
+        #     if set(c) == test_set:
+        #         extra_prints = True
+        #         break
+        # if extra_prints:
+        #     logger.info("Printing relevant LCAs and scores:")
         lcas_for_scoring = self.queues.get_S()
         for a in lcas_for_scoring:
             if self.phase == 'scoring':
@@ -579,9 +589,9 @@ class graph_algorithm(object):  # NOQA
                     a.subgraph, a.from_cids(), a.from_node2cid()
                 )
             a.set_to_clusters(to_c, to_score)
-            if extra_prints:
-                if (test_set in a.from_clusters.values()) != (test_set in a.to_clusters.values()):
-                    logger.info(f"From: {a.from_clusters}, to: {a.to_clusters}, delta score: {a.to_score - a.from_score}")
+            # if extra_prints:
+            #     if (test_set in a.from_clusters.values()) != (test_set in a.to_clusters.values()):
+            #         logger.info(f"From: {a.from_clusters}, to: {a.to_clusters}, delta score: {a.to_score - a.from_score}")
         self.queues.add_to_Q(lcas_for_scoring)
         self.queues.clear_S()
 

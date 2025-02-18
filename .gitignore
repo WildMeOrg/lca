@@ -19,3 +19,7 @@ lca/visualisations/
 !lca/configs/config_default.yaml
 
 ui/node_modules
+
+*.pickle
+*.json
+*.zip

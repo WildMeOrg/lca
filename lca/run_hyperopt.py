@@ -41,7 +41,7 @@ def get_objective(config_path):
 
 
 def run_hyperopt():
-    config_path = './configs/config_spermwhale.yaml'
+    config_path = './configs/config_whaleshark.yaml'
 
     objective, config = get_objective(config_path)
 

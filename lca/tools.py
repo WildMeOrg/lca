@@ -11,6 +11,8 @@ import json
 
 import numpy as np
 
+from weighter import weighter
+
 
 
 
@@ -284,9 +286,12 @@ def get_histogram(initial_edges, wgtr, species, timestamp, wgtrs_calib_dict):
 
 
     # wgtr = weighter.weighter(scorer, config["lca"]["edge_weights"]['prob_human_correct'])
-    wgtr.max_weight = 10
+    weighter_max = weighter.max_weight
+    weighter.max_weight = 10
     
     plt.plot(xs, [wgtr.wgt_smooth(x) for x in xs], 'k-')
+
+    weighter.max_weight = weighter_max
 
     plt.xlabel("Score")
     plt.ylabel("Probability density function")

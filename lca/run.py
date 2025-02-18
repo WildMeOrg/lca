@@ -1,10 +1,13 @@
 import numpy as np
 from preprocess import preprocess_data
 from embeddings import Embeddings
+from embeddings_lightglue import LightglueEmbeddings
 from binary_embeddings import BinaryEmbeddings
+from synthetic_embeddings import SyntheticEmbeddings
 from random_embeddings import RandomEmbeddings
+import scores.kernel_density_scores as kernel_density_scores
 # from synthetic_embeddings import SyntheticEmbeddings as Embeddings
-from curate_using_LCA import curate_using_LCA, generate_wgtr_calibration_ground_truth, generate_ground_truth_random, generate_calib_weights
+from curate_using_LCA import curate_using_LCA, generate_wgtr_calibration_ground_truth, generate_ground_truth_random, generate_calib_weights, generate_ground_truth_full_dataset
 from tools import *
 import random
 import os
@@ -59,8 +62,8 @@ def process_verifier_edges(method, edges, human_reviewer, num_pos_needed, num_ne
     pos, neg, quit = generate_ground_truth_random(edges, human_reviewer, num_pos_needed, num_neg_needed)
     logger.info(f"Method: {method}, Num pos edges: {len(pos)}, num neg edges: {len(neg)}")
     return {
-        "gt_positive_probs": [p.item() for _, _, p in pos],
-        "gt_negative_probs": [p.item() for _, _, p in neg],
+        "gt_positive_probs": [p for _, _, p in pos],
+        "gt_negative_probs": [p for _, _, p in neg],
     }, pos, neg
 
 
@@ -96,7 +99,7 @@ def run(config):
 
     logger.info("START")
     
-    
+    verifier_name = lca_config['verifier_name']
     embeddings, uuids = load_pickle(data_params['embedding_file'])
     # uuids = [int(id) for id in uuids]
     # save_pickle((embeddings, uuids), data_params['embedding_file'])
@@ -160,36 +163,12 @@ def run(config):
     cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
     ga_driver.set_validator_functions(cluster_validator.trace_start_human, cluster_validator.trace_iter_compare_to_gt)
 
+    
 
     # create embeddings verifier
     print(len(node2uuid.keys()))
     print(len(embeddings))
-    embeddings_dict = {
-        'miewid': Embeddings(embeddings, node2uuid, distance_power=lca_params['distance_power']),
-        'binary': BinaryEmbeddings(node2uuid, df, filter_key),
-        'random': RandomEmbeddings()
-    }
-    verifiers_dict = {ver_name: call_verifier_alg(embeddings_dict[ver_name]) for ver_name in embeddings_dict.keys()}
-    verifier_embeddings = embeddings_dict[lca_config['verifier_name']]
-
     
-    # verifier_embeddings = Embeddings(node2uuid, df, filter_key)
-    verifier_edges = verifier_embeddings.get_edges()
-    
-
-
-    topk_results = verifier_embeddings.get_stats(filtered_df, filter_key)
-
-    logger.info(f"Statistics: " + ", ".join([f"{k}: {100*v:.2f}%" for (k, v) in topk_results]))
-
-
-    top20_results = verifier_embeddings.get_top20_matches(filtered_df, filter_key)
-
-    
-    for uuid, top20 in top20_results.items():
-        logger.info(f"ID: {uuid} | TOP-20: " + ", ".join([f"{k}: {v:.2f}" for (k, v) in top20]))
-    
-   
 
     # create human reviewer
 
@@ -198,14 +177,55 @@ def run(config):
     human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
     
     
-
     #curate LCA
     try:
         human_reviews = []
         current_clustering={}
         cluster_data = {}
-        verifier_name = lca_config['verifier_name']
+
+
+        num_pos_needed = lca_params['num_pos_needed']
+        num_neg_needed = lca_params['num_neg_needed']
+
+        embeddings_dict = {
+            'miewid': Embeddings(embeddings, node2uuid, distance_power=lca_params['distance_power']),
+            'binary': BinaryEmbeddings(node2uuid, df, filter_key),
+            'random': RandomEmbeddings(),
+            'lightglue': LightglueEmbeddings(node2uuid, "lightglue_scores_superpoint.pickle")
+        }
+        verifiers_dict = {ver_name: call_verifier_alg(embeddings_dict[ver_name]) for ver_name in embeddings_dict.keys()}
+        if verifier_name == 'synthetic' or 'synthetic' in lca_params['aug_names']:
+            verifier_edges = embeddings_dict['miewid'].get_edges()
+            
+            pos, neg, quit = generate_ground_truth_full_dataset(verifier_edges, human_reviewer)
+            scorer = kernel_density_scores.kernel_density_scores.create_from_samples(
+                pos, neg
+            ) 
+
+            synthetic_embeddings = SyntheticEmbeddings(node2uuid, df, filter_key, lambda: scorer.density_pos.sample().item(), lambda: scorer.density_neg.sample().item())
+            embeddings_dict['synthetic'] = synthetic_embeddings
+
+
+        verifier_embeddings = embeddings_dict[lca_config['verifier_name']]
+        
         verifier_alg = call_verifier_alg(verifier_embeddings)
+
+        # verifier_embeddings = Embeddings(node2uuid, df, filter_key)
+        verifier_edges = verifier_embeddings.get_edges()
+        
+
+
+        topk_results = verifier_embeddings.get_stats(filtered_df, filter_key)
+
+        logger.info(f"Statistics: " + ", ".join([f"{k}: {100*v:.2f}%" for (k, v) in topk_results]))
+
+
+        top20_results = verifier_embeddings.get_top20_matches(filtered_df, filter_key)
+
+        
+        for uuid, top20 in top20_results.items():
+            logger.info(f"ID: {uuid} | TOP-20: " + ", ".join([f"{k}: {v:.2f}" for (k, v) in top20]))
+        
         if lca_config.get('clear_db', False) and os.path.exists(autosave_file):
             logger.info("Removing old autosave...")
             os.remove(autosave_file)
@@ -219,15 +239,10 @@ def run(config):
         else:
             # generate wgtr calibration    
 
-            num_pos_needed = lca_params['num_pos_needed']
-            num_neg_needed = lca_params['num_neg_needed']
             # num_bins = 100
             # min_from_bin = 1
             # needed_total = 200#num_pos_needed + num_neg_needed
             # logger.info(f"Need total of {needed_total} reviews from {num_bins} bins with a minimum of {min_from_bin} samples from each bin")
-            human_reviewer = call_get_reviews(df, filter_key, 1)
-            # pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed, num_bins=2)
-            pos, neg, quit = generate_ground_truth_random(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
             # pos, neg, quit = generate_wgtr_calibration_random_bins(verifier_edges, human_reviewer, needed_total, min_from_bin, num_bins=num_bins)
             human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
             
@@ -285,7 +300,9 @@ def run(config):
                     all_edges_plot.append((a0, a1, s, wgtrs[verifier_name].wgt(s), gt_node2cid[int(a0)]== gt_node2cid[int(a1)]))
                 write_json(all_edges_plot, f"/ekaterina/work/src/lca/lca/tmp/initial_edges_{exp_name}.json")
                 get_histogram(all_edges_plot, wgtrs[verifier_name], species, timestamp, wgtrs_calib_dict[verifier_name])
-        
+            
+            print(f"Printing log to {os.path.abspath(lca_config['logging']['log_file'])}")
+
             lca_object = curate_using_LCA(verifiers_dict, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, clustering_file, current_clustering, lca_params)
             
             def save_iteration_graph(iteration):

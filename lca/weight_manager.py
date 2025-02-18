@@ -52,6 +52,7 @@ class weight_manager(object):  # NOQA
         self.tries_before_done = tries_before_edge_done
         self.request_cb = request_cb
         self.result_cb = result_cb
+        
         assert self.aug_names[-1] == 'human'
         self.num_names = len(self.aug_names)
         self.augment_count = collections.defaultdict(empty_gen(self.num_names))

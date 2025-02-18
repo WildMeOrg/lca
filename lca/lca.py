@@ -6,7 +6,9 @@ import networkx as nx
 
 import cluster_tools as ct
 import test_cluster_tools as tct
+from weighter import weighter
 
+import numpy as np
 
 logger = logging.getLogger('lca')
 
@@ -56,6 +58,44 @@ class LCA(object):
 
     def nodes(self):
         return set.union(*self.from_clusters.values())
+
+
+    def average_change_weight(self, threshold_ratio=0.2):
+        """
+        Calculates the average of absolute weights for edges where
+        'from_n2c' and 'to_n2c' are not the same, and compares it to the threshold.
+        
+        Parameters:
+        threshold (float): The threshold to compare the average weight against.
+
+        Returns:
+        bool: True if the average exceeds the threshold, False otherwise.
+        """
+
+        threshold = threshold_ratio * weighter.max_weight
+        if self.to_n2c is None:
+            return False, []
+        
+        weights = []
+        edges = []
+        for u, v, data in self.subgraph.edges(data=True):
+            from_cluster_u = self.from_n2c[u]
+            from_cluster_v = self.from_n2c[v]
+            to_cluster_u = self.to_n2c[u]
+            to_cluster_v = self.to_n2c[v]
+
+            if from_cluster_u != to_cluster_u or from_cluster_v != to_cluster_v:
+                weights.append(data['weight'])
+                edges.append(tuple(sorted((u,v))))
+
+        if not weights:
+            logger.info("No edges with differing clusters found.")
+            return False, []
+
+        avg_weight = sum(abs(w) for w in weights) / len(weights)
+        # avg_weight = np.median(np.abs(weights))
+        logger.info(f"Average weight: {avg_weight}, Threshold: {threshold}")
+        return avg_weight < threshold, edges
 
     def set_to_clusters(self, to_clusters, to_score):
         self.to_clusters = to_clusters
@@ -129,7 +169,6 @@ class LCA(object):
         n1_cid = self.from_n2c[n1]
         from_score_change = self.get_score_change(wgt, n0_cid, n1_cid)
         self.from_score += from_score_change
-
         """The to_clusters may not yet exist, which could occur if this LCA
         has just been created.  In this case, there is nothing more to
         do and we can safely return 0 for the to_delta score because

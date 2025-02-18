@@ -366,6 +366,41 @@ def generate_ground_truth_random(verifier_edges,
     return pos_triples, neg_triples, quit_lca
 
 
+def generate_ground_truth_full_dataset(verifier_edges,
+                                           human_reviewer):
+
+    verifier_edges = list(verifier_edges)
+    # Shuffle verifier edges randomly
+    random.shuffle(verifier_edges)
+
+    # Prepare lists to store results
+    pos_triples = []
+    neg_triples = []
+
+    # Send edges to the human reviewer in small batches
+    i = 0
+    quit_lca = False
+    num_in_batch = 100
+    while i < len(verifier_edges):
+        # Select a batch of edges
+        j = min(i + num_in_batch, len(verifier_edges))
+        edges_batch = verifier_edges[i:j]
+
+        # Get reviews from the human reviewer
+        reviews, quit_lca = human_reviewer([(n0, n1) for n0, n1, s in edges_batch])
+
+        for n0, n1, b in reviews:
+            e = (n0, n1, next(s for x0, x1, s in verifier_edges if x0 == n0 and x1 == n1))
+            if b:
+                pos_triples.append(e)
+            else:
+                neg_triples.append(e)
+
+        i = j
+
+    return pos_triples, neg_triples, quit_lca
+
+
 def generate_calib_weights(pos, neg, get_score):
 
     pos_result = []

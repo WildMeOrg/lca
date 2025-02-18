@@ -131,6 +131,7 @@ def run(config):
         cluster_data = {}
         verifier_name = lca_config['verifier_name']
         verifier_alg = call_verifier_alg(verifier_embeddings)
+        
 
         if os.path.exists(autosave_file):
             wgtrs_calib_dict = load_json(verifier_file)
@@ -144,14 +145,23 @@ def run(config):
 
             num_pos_needed = lca_params['num_pos_needed']
             num_neg_needed = lca_params['num_neg_needed']
+
+            embeddings_dict = {
+                'miewid': Embeddings(embeddings, node2uuid, distance_power=lca_params['distance_power']),
+            }
+            verifiers_dict = {ver_name: call_verifier_alg(embeddings_dict[ver_name]) for ver_name in embeddings_dict.keys()}
+
+
+
             if os.path.exists(verifier_file):
                 wgtrs_calib_dict = load_json(verifier_file)
             else:
                 pos, neg, quit = generate_wgtr_calibration_ground_truth(verifier_edges, human_reviewer, num_pos_needed, num_neg_needed)
                 wgtrs_calib_dict = save_probs_to_db(pos, neg, verifier_file)
         
-            lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, clustering_file, current_clustering, lca_params)
-            
+            # lca_object = curate_using_LCA(verifier_alg, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, clustering_file, current_clustering, lca_params)
+            lca_object = curate_using_LCA(verifiers_dict, verifier_name, human_reviewer, wgtrs_calib_dict, edge_db_file, clustering_file, current_clustering, lca_params)
+
             verifier_edges = [
                 (n0, n1, s, verifier_name)
                 for n0, n1, s in verifier_edges

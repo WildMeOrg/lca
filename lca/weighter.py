@@ -32,18 +32,20 @@ class weighter(object):  # NOQA
             % (self.human_prob, 100)
         )
 
-    def wgt(self, score):
+    def wgt(self, score, w_delta=0.15):
+        """Given a verification score produce a (scalar) weight"""
+        w = self.wgt_smooth(score, w_delta=w_delta)
+        w = int(round(w))
+
+        return w
+    
+    def wgt_smooth(self, score, w_delta=0.15):
         """Given a verification score produce a (scalar) weight"""
         w0 = self.scorer.raw_wgt_(score)
         w = self.scale_and_trunc_(w0)
-        return int(w)
-    
-    def wgt_smooth(self, score):
-        """Given a verification score produce a (scalar) weight"""
-        w0 = self.scorer.raw_wgt_(score)
-        w0 = np.clip(w0, -self.max_raw_weight, self.max_raw_weight)
-        # logger.info(f"Clipped score: {w0}")
-        w = w0 / self.max_raw_weight * self.max_weight
+        # logger.info(f"Clipped score: {w}, if true: {(w0 >= -w_delta) and ( w0<= w_delta)}")
+        # if ((w >= -w_delta*weighter.max_weight) and (w<= w_delta*weighter.max_weight)):
+        #     w=0
         return w
 
     @staticmethod
@@ -84,7 +86,8 @@ class weighter(object):  # NOQA
         # logger.info(f"Input score: {w0}")
         w0 = np.clip(w0, -self.max_raw_weight, self.max_raw_weight)
         # logger.info(f"Clipped score: {w0}")
-        w = round(w0 / self.max_raw_weight * self.max_weight)
+        # w = round(w0 / self.max_raw_weight * self.max_weight)
+        w = w0 / self.max_raw_weight * self.max_weight
         # logger.info(f"Final score: {w}")
         return w
 
