@@ -51,6 +51,7 @@ def run(config):
         Returns:
             (confidence, label)
         """
+
         score = edge[2]
         if score < low:
             return ((low - score)/low, 'negative')
@@ -114,15 +115,15 @@ def run(config):
 
 
     # Create human reviewer
-    prob_human_correct = lca_config['prob_human_correct']
+    prob_human_correct = lca_config['edge_weights']['prob_human_correct']
         
     human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
 
-    PCCs, for_review = graph_consistency.step(initial_edges, [])
+    PCCs, for_review = graph_consistency.step(initial_edges, [], ranker_name=lca_config['verifier_name'])
 
     while len(PCCs) > 0:
         human_reviews = human_reviewer(for_review)
-        PCCs, for_review = graph_consistency.step([], human_reviews)
+        PCCs, for_review = graph_consistency.step([], human_reviews, ranker_name='human')
     
     # add logger prints to keep track of what is going on
 

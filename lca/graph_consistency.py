@@ -21,7 +21,7 @@ class GraphConsistencyAlgorithm(object):
         self.config = config
 
 
-    def step(self, new_edges, human_decisions):
+    def step(self, new_edges, human_decisions, ranker_name):
         """
         Perform one step of the graph consistency algorithm.
 
@@ -30,7 +30,7 @@ class GraphConsistencyAlgorithm(object):
             human_decisions : list of human decisions of the form [(n0, n1, "positive"|"negative")]
         """
         
-        self.add_new_edges(new_edges)
+        self.add_new_edges(new_edges, ranker_name)
         self.process_human_decisions(human_decisions)
 
         PCCs = self.find_inconsistent_PCCs()
@@ -41,7 +41,7 @@ class GraphConsistencyAlgorithm(object):
 
         return PCCs, for_review
 
-    def add_new_edges(self, new_edges):
+    def add_new_edges(self, new_edges, ranker_name):
         """
         Add new edges from the ranker into the consistency graph. 
         Each edge is run through the verifier to generate the label and a confidence score before adding it to the graph.
@@ -50,8 +50,8 @@ class GraphConsistencyAlgorithm(object):
             new_edges : list of edges from the ranker of the form [(n0, n1, score, ranker_name),...]
         """
 
-        for n0, n1, score, ranker_name in new_edges:
-            confidence, label = self.verifier((n0, n1))
+        for n0, n1, score in new_edges:
+            confidence, label = self.verifier((n0, n1, score, ranker_name))
         
         confidence = max(0, min(1, confidence))
         self.G.add_edge(n0, n1, score=score, label=label, confidence=confidence, ranker=ranker_name)
@@ -67,7 +67,7 @@ class GraphConsistencyAlgorithm(object):
         # Go through each human decision and update the labels in the current graph, use the confidence from the config:
         for (n0, n1, human_label) in human_decisions:
           self.G.edges[n0, n1]["label"] = human_label
-          self.G.edges[n0, n1]["confidence"] = self.config["human_confidence"]     
+          self.G.edges[n0, n1]["confidence"] = self.config["prob_human_correct"]     
 
     def find_inconsistent_PCCs(self):
         """
