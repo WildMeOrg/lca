@@ -142,7 +142,7 @@ class Embeddings(object):
         embeds_num = len(embeddings)
         total_edges = (embeds_num * embeds_num - embeds_num)/2
         target_proportion = np.clip(target_edges/total_edges, 0, 1)
-        # print(f"Target: {target_edges}/{total_edges}")
+        print(f"Target: {target_edges}/{total_edges}")
         for distmat in chunks:
             sorted_dists = distmat.argsort(axis=1).argsort(axis=1) < topk
             # thresholded_dists = np.triu(distmat <= np.quantile(distmat.flatten(), distance_threshold), start)

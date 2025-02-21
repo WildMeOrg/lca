@@ -34,43 +34,178 @@ def call_verifier_alg(embeddings):
     return verifier_alg
 
 
+def visualize_graph_with_labels(G):
+    """
+    Visualizes the graph with edge labels for "positive" and "negative" edges.
+
+    Args:
+        G (nx.Graph): The graph to visualize.
+    """
+    plt.figure(figsize=(10, 7))
+    pos = nx.spring_layout(G)  # Position layout
+
+    # Extract edges based on labels
+    positive_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("label") == "positive"]
+    negative_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("label") == "negative"]
+
+    # Draw nodes
+    nx.draw_networkx_nodes(G, pos, node_size=500, node_color="lightblue", edgecolors="black")
+
+    # Draw edges
+    nx.draw_networkx_edges(G, pos, edgelist=positive_edges, edge_color="green", width=2, label="Positive Edges")
+    nx.draw_networkx_edges(G, pos, edgelist=negative_edges, edge_color="red", width=2, label="Negative Edges")
+
+    # Draw labels
+    nx.draw_networkx_labels(G, pos, font_size=12, font_color="black")
+
+    # Draw edge labels
+    edge_labels = {(u, v): d["label"] for u, v, d in G.edges(data=True)}
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_color="blue")
+
+    plt.title("Graph Visualization with Edge Labels")
+    plt.legend()
+    plt.savefig("graph_with_labels.png") 
+    plt.show()
+
+
+def save_graph_to_cytoscape(G, filename):
+    """
+    Saves the given NetworkX graph as a Cytoscape-compatible JSON file.
+
+    Args:
+        G (nx.Graph): The NetworkX graph.
+        filename (str): The file path where the JSON will be saved.
+    """
+    # Ensure node labels are strings (Cytoscape expects string IDs)
+    G = nx.relabel_nodes(G, lambda x: str(x))
+
+    # Convert to Cytoscape format
+    cytoscape_data = nx.cytoscape_data(G)
+
+    # Save to file
+    write_json(cytoscape_data, filename)
+
+    print(f"Graph saved as Cytoscape JSON: {filename}")
+
+def get_positive_subgraph(G, logger):
+    # Extract positive edges
+    positive_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("label") == "positive"]
+    logger.info("positive edges", positive_edges)
+    
+    # Create a subgraph with only positive edges
+    positive_G = G.edge_subgraph(positive_edges)
+    return positive_G
+
+def get_positive_clusters(G, logger):
+    """
+    Get clustering from the graph where clusters are connected components of positive edges.
+
+    Args:
+        G (nx.Graph): The graph containing nodes and edges with labels.
+
+    Returns:
+        cluster_dict (dict): A dictionary mapping cluster IDs to sets of nodes.
+        node2cid (dict): A mapping of each node to its cluster ID.
+    """
+
+    positive_G = get_positive_subgraph(G, logger)
+    
+    # Find connected components
+    clusters = list(nx.connected_components(positive_G))
+    
+    # Convert list to a dictionary {cluster_id: set_of_nodes}
+    cluster_dict = {cid: cluster for cid, cluster in enumerate(clusters)}
+    
+    # Create a node-to-cluster ID mapping
+    node2cid = {node: cid for cid, cluster in cluster_dict.items() for node in cluster}
+
+    return cluster_dict, node2cid
+
 def run(config):
     np.random.seed(42)
     random.seed(42)
     logger = logging.getLogger('lca')
 
-    def simple_verifier(edge, low=0.4, high=0.6):
+
+    def check_ground_truth(u, v, gt_node2cid):
         """
-        A primitive verifier that just labels the edge according to the ranker score.
-
-        Args:
-            edge : (n0, n1, score, ranker_name)
-            low (float, optional): lower threshold, scores lower than that are considered negative. Defaults to 0.4.
-            high (float, optional): higher threshold, scores higher than that are considered positive. Defaults to 0.6.
-
-        Returns:
-            (confidence, label)
-        """
-
-        score = edge[2]
-        if score < low:
-            return ((low - score)/low, 'negative')
-        elif score < high:
-            return (0.5, 'incomparable')
-        else:
-            return ((score - high)/(1 - high), 'positive')
+        Check if two nodes belong to the same cluster in ground truth.
         
-    graph_consistency = GraphConsistencyAlgorithm(simple_verifier)
+        Args:
+            u: first node
+            v: second node
+            gt_node2cid: dictionary mapping nodes to their ground truth cluster IDs
+        
+        Returns:
+            bool: True if nodes are in same cluster, False otherwise
+        """
+        if u not in gt_node2cid or v not in gt_node2cid:
+            return False
+        return gt_node2cid[u] == gt_node2cid[v]
+    
+
+    def simulated_verifier(edge, gt_node2cid, correct_prob=0.8):
+        """
+        Simulated verifier that uses ground truth with some error probability.
+        
+        Args:
+            edge: tuple of (u, v, score, ranker_name)
+            gt_node2cid: ground truth cluster assignments
+            correct_prob: probability of making correct classification
+        
+        Returns:
+            tuple: (confidence, label)
+        """
+        (u, v, score, ranker_name) = edge
+        is_positive = check_ground_truth(u, v, gt_node2cid)
+        confidence = score if is_positive else 1 - score
+        if np.random.random() > correct_prob:
+            is_positive = not is_positive
+        return (confidence, "positive" if is_positive else "negative")
+    
+
+    def configured_verifier(edge):
+        return simulated_verifier(
+            edge, 
+            gt_node2cid,
+            correct_prob=lca_config.get('classifier_correct_prob', 0.8)
+        )
+    
 
     lca_config = config['lca']
     data_params = config['data']
     exp_name = config['exp_name']
     species = config['species']
 
+    lca_config["flip_threshold"] = 0.0
+
+
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     if lca_config['logging'].get("update_log_file", True):
         log_file_name = f"tmp/logs/{exp_name}_{timestamp}.log"
         lca_config['logging']['log_file'] = log_file_name
+
+    log_level = lca_config['logging']['log_level']
+    log_file = lca_config['logging']['log_file']
+    
+    if log_file is not None:
+        logger = logging.getLogger('lca')
+        handlers = logger.handlers[:]
+        for handler in handlers:
+            logger.removeHandler(handler)
+            handler.flush()
+            handler.close()
+
+        file_mode = lca_config['logging'].get("file_mode", 'w')
+        
+        handler = logging.FileHandler(log_file, mode=file_mode)
+        handler.setLevel(log_level)
+        handler.setFormatter(get_formatter())
+        logger.addHandler(handler)
+
+    graph_consistency = GraphConsistencyAlgorithm(configured_verifier, lca_config)
+
+   
 
     verifier_name = lca_config['verifier_name']
     embeddings, uuids = load_pickle(data_params['embedding_file'])
@@ -95,23 +230,28 @@ def run(config):
     embeddings = [embeddings[uuids.index(uuid)] for uuid in filtered_df['uuid_x']]
     gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(filtered_df, filter_key)
 
+    logger.info(f"Ground truth clustering: {gt_clustering}")
+    cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
+
     embeddings_dict = {
         'miewid': Embeddings(embeddings, node2uuid, distance_power=lca_config['distance_power']),
     }
-    verifiers_dict = {ver_name: call_verifier_alg(embeddings_dict[ver_name]) for ver_name in embeddings_dict.keys()}
 
     verifier_embeddings = embeddings_dict[lca_config['verifier_name']]
         
 
     # Here we need to get initial edges from our ranker (MiewID, take the same code from LCA run.py)
-    initial_edges = verifier_embeddings.get_edges()
+    all_edges = list(verifier_embeddings.get_edges(target_edges=100000))
+    edges_per_iteration = 1000
+
+    initial_edges = all_edges[:edges_per_iteration]
+    all_edges = all_edges[edges_per_iteration:]
+    # print(initial_edges)
 
     topk_results = verifier_embeddings.get_stats(filtered_df, filter_key)
 
     logger.info(f"Statistics: " + ", ".join([f"{k}: {100*v:.2f}%" for (k, v) in topk_results]))
 
-
-    top20_results = verifier_embeddings.get_top20_matches(filtered_df, filter_key)
 
 
     # Create human reviewer
@@ -121,11 +261,36 @@ def run(config):
 
     PCCs, for_review = graph_consistency.step(initial_edges, [], ranker_name=lca_config['verifier_name'])
 
-    while len(PCCs) > 0:
-        human_reviews = human_reviewer(for_review)
-        PCCs, for_review = graph_consistency.step([], human_reviews, ranker_name='human')
     
-    # add logger prints to keep track of what is going on
+    logger.info(f"Finished step")
+
+    num_human = 0
+    iter = 0
+    max_iter = 250000
+
+    clustering, node2cid = get_positive_clusters(graph_consistency.G, logger)
+    cluster_validator.trace_start_human(clustering, node2cid, get_positive_subgraph(graph_consistency.G, logger), num_human)
+
+
+    while len(all_edges)>0 or (len(PCCs) > 0 and iter < max_iter):
+        human_reviews = human_reviewer(for_review)
+        num_human += len(human_reviews)
+
+        iter_edges = []
+        if len(all_edges) > 0:
+            iter_edges = all_edges[:edges_per_iteration]
+            all_edges = all_edges[edges_per_iteration:]
+
+        logger.info(f"Received {len(human_reviews)} human reviews")
+        logger.info(f"Iteration {iter}")
+        PCCs, for_review = graph_consistency.step(iter_edges, human_reviews, ranker_name=lca_config['verifier_name'])
+        iter+=1
+
+   
+    clustering, node2cid = get_positive_clusters(graph_consistency.G, logger)
+    cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, get_positive_subgraph(graph_consistency.G, logger))
+
+    save_graph_to_cytoscape(graph_consistency.G, "graph_cytoscape.json")
 
     return
 
