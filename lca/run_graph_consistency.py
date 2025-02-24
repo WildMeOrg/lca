@@ -90,7 +90,7 @@ def save_graph_to_cytoscape(G, filename):
 def get_positive_subgraph(G, logger):
     # Extract positive edges
     positive_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("label") == "positive"]
-    logger.info("positive edges", positive_edges)
+    logger.info(f"positive edges {positive_edges}")
     
     # Create a subgraph with only positive edges
     positive_G = G.edge_subgraph(positive_edges)
@@ -159,7 +159,8 @@ def run(config):
         (u, v, score, ranker_name) = edge
         is_positive = check_ground_truth(u, v, gt_node2cid)
         confidence = score if is_positive else 1 - score
-        if np.random.random() > correct_prob:
+        full_correct_prob = correct_prob + (1-correct_prob)*confidence # if we want to correlate the correctness with the confidence even more
+        if np.random.random() > full_correct_prob:
             is_positive = not is_positive
         return (confidence, "positive" if is_positive else "negative")
     
@@ -168,7 +169,7 @@ def run(config):
         return simulated_verifier(
             edge, 
             gt_node2cid,
-            correct_prob=lca_config.get('classifier_correct_prob', 0.8)
+            correct_prob=lca_config.get('classifier_correct_prob', 0.2)
         )
     
 
@@ -177,7 +178,7 @@ def run(config):
     exp_name = config['exp_name']
     species = config['species']
 
-    lca_config["flip_threshold"] = 0.0
+    lca_config["flip_threshold"] = 0.5
 
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -241,8 +242,8 @@ def run(config):
         
 
     # Here we need to get initial edges from our ranker (MiewID, take the same code from LCA run.py)
-    all_edges = list(verifier_embeddings.get_edges(target_edges=100000))
-    edges_per_iteration = 1000
+    all_edges = list(verifier_embeddings.get_edges(target_edges=1000000))
+    edges_per_iteration = 500
 
     initial_edges = all_edges[:edges_per_iteration]
     all_edges = all_edges[edges_per_iteration:]
@@ -271,27 +272,33 @@ def run(config):
     clustering, node2cid = get_positive_clusters(graph_consistency.G, logger)
     cluster_validator.trace_start_human(clustering, node2cid, get_positive_subgraph(graph_consistency.G, logger), num_human)
 
+    human_review_step = 100
+    print(f"Logging to {os.path.abspath(log_file)}")
+    while len(all_edges)>0:# or (len(PCCs) > 0 and iter < max_iter):
+        while (len(PCCs) > 0 and iter < max_iter):
+            human_reviews = human_reviewer(for_review)
+            num_human += len(human_reviews)
 
-    while len(all_edges)>0 or (len(PCCs) > 0 and iter < max_iter):
-        human_reviews = human_reviewer(for_review)
-        num_human += len(human_reviews)
+            logger.info(f"Received {len(human_reviews)} human reviews")
+            logger.info(f"Iteration {iter}")
+            PCCs, for_review = graph_consistency.step(iter_edges, human_reviews, ranker_name=lca_config['verifier_name'])
 
-        iter_edges = []
+            if num_human - cluster_validator.prev_num_human > human_review_step:
+                clustering, node2cid = get_positive_clusters(graph_consistency.G, logger)
+                cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, get_positive_subgraph(graph_consistency.G, logger))
+            iter_edges = []
+            iter+=1
         if len(all_edges) > 0:
             iter_edges = all_edges[:edges_per_iteration]
             all_edges = all_edges[edges_per_iteration:]
-
-        logger.info(f"Received {len(human_reviews)} human reviews")
-        logger.info(f"Iteration {iter}")
-        PCCs, for_review = graph_consistency.step(iter_edges, human_reviews, ranker_name=lca_config['verifier_name'])
-        iter+=1
+            PCCs, for_review = graph_consistency.step(iter_edges, [], ranker_name=lca_config['verifier_name'])
 
    
     clustering, node2cid = get_positive_clusters(graph_consistency.G, logger)
     cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, get_positive_subgraph(graph_consistency.G, logger))
 
     save_graph_to_cytoscape(graph_consistency.G, "graph_cytoscape.json")
-
+    print(f"Saved log to {os.path.abspath(log_file)}")
     return
 
 

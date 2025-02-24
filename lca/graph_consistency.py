@@ -1,6 +1,7 @@
 
 import networkx as nx
 import numpy as np
+import logging
 
 class GraphConsistencyAlgorithm(object):
     def __init__(self, verifier, config, G=nx.Graph()):
@@ -32,13 +33,15 @@ class GraphConsistencyAlgorithm(object):
         self.process_human_decisions(human_decisions)
 
         PCCs = self.find_inconsistent_PCCs()
-
+        logger = logging.getLogger('lca')
         for_review = []
+        logger.info(f"Received {len(new_edges)} new edges and {len(human_decisions)} human reviews")
         for PCC in PCCs:
-            print(f"PCC is {PCC}")
+            logger.info(f"PCC is {PCC}")
             for_review.extend(self.process_PCC(PCC))
-            print("extended graph for review")
-        print(f"{len(for_review)} edges to be reviewed")
+            # print("extended graph for review")
+        # print(f"{len(for_review)} edges to be reviewed")
+        logger.info(f"{len(for_review)} edges to be reviewed")
         return PCCs, for_review
 
     def add_new_edges(self, new_edges, ranker_name):
@@ -151,9 +154,7 @@ class GraphConsistencyAlgorithm(object):
                     [(u, v, nonnegPCC[u][v]['confidence']) for u, v in zip(best_cycle, best_cycle[1:] + [best_cycle[0]])],
                     key=lambda edge: edge[2]
                 )
-
                 if confidence < self.config["flip_threshold"] and not self.G[u][v]['auto_flipped']:
-                
                     auto_flip_edges.add((u, v))
                 else:
                     result.add((u, v))
@@ -161,8 +162,10 @@ class GraphConsistencyAlgorithm(object):
             nonnegPCC.remove_edge(n0, n1)
         
         for (u, v) in auto_flip_edges:
-            self.G[u][v]['label'] = "positive" if self.G[u][v]['label'] == 'negative' else "negative"
-            self.G[u][v]['confidence'] = 0.8 * self.G[u][v]['confidence']
+            if self.G[u][v]['label'] == "positive":
+                self.G[u][v]['label'] = "positive" if self.G[u][v]['label'] == 'negative' else "negative"
+                # self.G[u][v]['confidence'] = 0.5 * self.G[u][v]['confidence']
+                # self.G[u][v]['confidence'] = 1 - self.G[u][v]['confidence']
             self.G[u][v]['auto_flipped'] = True
 
         return result

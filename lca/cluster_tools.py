@@ -465,8 +465,8 @@ def precision_recall(est, est_n2c, gt, gt_n2c):
                     fn += 1
 
     if tp + fp > 0:
-        precision = tp / (tp + fp)
-        recall = tp / (tp + fn)
+        precision = tp / max((tp + fp), 1)
+        recall = tp / max((tp + fn), 1)
 
         if precision + recall > 0:
             f1_score = 2 * (precision * recall) / (precision + recall)
