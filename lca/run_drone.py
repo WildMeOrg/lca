@@ -72,10 +72,13 @@ def run(config):
     else:
         db_path = os.path.join(lca_config['db_path'], config['exp_name'])
         os.makedirs(db_path, exist_ok=True)
+
+
+    verifier_file = lca_config['verifier_path']
     
         
 
-    verifier_file =  os.path.join(str(db_path), "verifiers_probs.json")
+    # verifier_file =  os.path.join(str(db_path), "verifiers_probs.json")
     edge_db_file =  os.path.join(str(db_path), "quads.csv")
     clustering_file = os.path.join(str(db_path), "clustering.json")
     autosave_file = os.path.join(str(db_path), "autosave.json")
