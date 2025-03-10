@@ -353,6 +353,10 @@ def count_equal_clustering(from_clustering, to_clustering, to_n2c):
     for from_c in from_clustering.values():
         node = from_c.pop()  # ugly, but need to get a node from the
         from_c.add(node)  # cluster set and put it back
+        if (node not in to_n2c):
+            # print(f"NO {node}")
+            continue
+        
         to_c = to_clustering[to_n2c[node]]
 
         if from_c == to_c:
@@ -368,6 +372,9 @@ def get_nonequal_clustering(from_clustering, to_clustering, to_n2c):
     for from_c in from_clustering.values():
         node = from_c.pop()  
         from_c.add(node) 
+        if (node not in to_n2c):
+            # print(f"NO {node}")
+            continue
         to_c = to_clustering[to_n2c[node]]
 
         if from_c != to_c:
@@ -484,5 +491,6 @@ def percent_and_PR(est, est_n2c, gt, gt_n2c):
     non_eq = get_nonequal_clustering(est, gt, gt_n2c)
     pr, rec, f1 = precision_recall(est, est_n2c, gt, gt_n2c)
     per_size = precision_recall_per_size(est, est_n2c, gt, gt_n2c)
-    lng = len(est)
+    lng = len(est) 
+    lng = 1 if lng == 0 else lng
     return (num_eq / lng, pr, rec, per_size, non_eq, f1)

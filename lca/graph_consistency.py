@@ -32,8 +32,12 @@ class GraphConsistencyAlgorithm(object):
         self.add_new_edges(new_edges, ranker_name)
         self.process_human_decisions(human_decisions)
 
-        PCCs = self.find_inconsistent_PCCs()
         logger = logging.getLogger('lca')
+        # self.densify_PCCs(logger)
+        # 
+        # self.connect_PCCs()
+        PCCs = self.find_inconsistent_PCCs(logger)
+        
         for_review = []
         logger.info(f"Received {len(new_edges)} new edges and {len(human_decisions)} human reviews")
         for PCC in PCCs:
@@ -44,6 +48,72 @@ class GraphConsistencyAlgorithm(object):
         logger.info(f"{len(for_review)} edges to be reviewed")
         return PCCs, for_review
 
+    def get_positive_clusters(self):
+        """
+        Get clustering from the graph where clusters are connected components of positive edges.
+
+        Args:
+            G (nx.Graph): The graph containing nodes and edges with labels.
+
+        Returns:
+            cluster_dict (dict): A dictionary mapping cluster IDs to sets of nodes.
+            node2cid (dict): A mapping of each node to its cluster ID.
+        """
+
+        positive_G = self.get_positive_subgraph(self.G)
+        
+        # Find connected components
+        clusters = list(nx.connected_components(positive_G))
+  
+        used_nodes = {n for c in clusters for n in c}
+        singletons = [n for n in self.G.nodes() if n not in used_nodes]#np.setdiff1d(list(self.G.nodes()), used_nodes)
+        
+        clusters = clusters + [{int(n)} for n in singletons]
+        # print(clusters)
+
+        # Convert list to a dictionary {cluster_id: set_of_nodes}
+        cluster_dict = {cid: cluster for cid, cluster in enumerate(clusters)}
+        
+        # Create a node-to-cluster ID mapping
+        node2cid = {node: cid for cid, cluster in cluster_dict.items() for node in cluster}
+
+        return cluster_dict, node2cid
+
+    def connect_PCCs(self):
+        logger = logging.getLogger('lca')
+        cluster_dict, node2cid = self.get_positive_clusters()
+        all_negative_edges = [(u, v, d["confidence"]) for u, v, d in self.G.edges(data=True) 
+                          if d.get("label") == "negative" and
+                          node2cid.get(u, -1) != node2cid.get(v, -2)]
+        connections = {}
+        for (u, v, d) in all_negative_edges:
+            cluster_pair = tuple(sorted([node2cid[u], node2cid[v]]))
+            if cluster_pair not in connections:
+                connections[cluster_pair] = []
+            connections[cluster_pair].append((u, v, d))
+        if not connections:
+            return
+        mean_confs = {pair:np.median([d for (_, _, d) in edges]) for (pair, edges) in connections.items()}
+        
+        # mean_confs = [(pair,np.median([d for (_, _, d) in edges])) for (pair, edges) in connections.items()]
+        # mean_confs = sorted(mean_confs, key=lambda x: x[1])
+
+        min_pair = min(mean_confs, key=mean_confs.get)
+        if mean_confs[min_pair] < self.config["negative_threshold"]:
+        # for (min_pair, mean_conf) in mean_confs:
+            # if mean_conf > self.config["negative_threshold"]:
+            #     break
+            edges = [(u,v,c) for (u,v,c) in connections[min_pair] if not self.G[u][v]['auto_flipped']]
+            if not edges:
+                return
+            u, v, c = max(edges, key=lambda x: x[2])
+            u, v = sorted([u, v])
+            logger.info(f"Flipped edge {(u, v, c)} to connect clusters {cluster_dict[min_pair[0]]} and {cluster_dict[min_pair[1]]}")
+            self.G[u][v]['label'] = "positive"
+            self.G[u][v]['auto_flipped'] = True
+
+
+
     def add_new_edges(self, new_edges, ranker_name):
         """
         Add new edges from the ranker into the consistency graph. 
@@ -53,11 +123,24 @@ class GraphConsistencyAlgorithm(object):
             new_edges : list of edges from the ranker of the form [(n0, n1, score, ranker_name),...]
         """
 
+        
+        logger = logging.getLogger('lca')
+
         for n0, n1, score in new_edges:
             confidence, label = self.verifier((n0, n1, score, ranker_name))
         
             confidence = np.clip(confidence, 0, 1)
             # print(f"adding edge ... {n0}, {n1} {score}")
+            if label == "positive":
+                positive_G = self.get_positive_subgraph(self.G)
+                components = list(nx.connected_components(positive_G))
+                c0 = next(filter(lambda c: n0 in c, components), {})
+                c1 = next(filter(lambda c: n1 in c, components), {})
+                if c0 != c1:
+                    logger.info(f"Added positive edge connecting clusters of size {len(c0)} and {len(c1)}")
+                
+            if self.G.has_edge(n0, n1):
+                logger.info(f"Adding duplicate edge")
             self.G.add_edge(n0, n1, score=score, label=label, confidence=confidence, ranker=ranker_name, auto_flipped=False)
         
 
@@ -68,9 +151,18 @@ class GraphConsistencyAlgorithm(object):
         Args:
             human_decisions : list of human decisions of the form [(n0, n1, "positive"|"negative")]
         """
+        
+        logger = logging.getLogger('lca')
         # Go through each human decision and update the labels in the current graph, use the confidence from the config:
         for (n0, n1, human_label) in human_decisions:
           new_label = "positive" if human_label else "negative"
+          if new_label == "positive":
+            positive_G = self.get_positive_subgraph(self.G)
+            components = list(nx.connected_components(positive_G))
+            c0 = next(filter(lambda c: n0 in c, components), {})
+            c1 = next(filter(lambda c: n1 in c, components), {})
+            if c0 != c1:
+                logger.info(f"Added human edge connecting clusters of size {len(c0)} and {len(c1)}")
           self.G.edges[n0, n1]["label"] = new_label
           self.G.edges[n0, n1]["confidence"] = self.config["edge_weights"]["prob_human_correct"]
           self.G.edges[n0, n1]["ranker"] = "human"
@@ -83,15 +175,42 @@ class GraphConsistencyAlgorithm(object):
         positive_G = G.edge_subgraph(positive_edges)
         return positive_G
     
-    def get_positive_subgraph(self, G):
+    def get_positive_subgraph(self, G, min_confidence=0):
         # Extract positive edges
-        positive_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("label") == "positive"]
+        positive_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("label") == "positive" and d.get("confidence") > min_confidence]
 
         # Create a subgraph with only positive edges
         positive_G = G.edge_subgraph(positive_edges)
         return positive_G
 
-    def find_inconsistent_PCCs(self):
+    def densify_PCCs(self, logger):
+        """
+        
+        """
+        # Create a subgraph with only positive edges
+        positive_G = self.get_positive_subgraph(self.G)
+        
+        # Find connected components
+        components = list(nx.connected_components(positive_G))
+        logger.info(f"Found connected components {len(components)}")   
+
+        # Check each component for inconsistencies
+        for component in components:
+            # logger.info(f"Nodes in component: {len(component)}")
+            subG = self.G.subgraph(component)  # Get all edges within the component
+            
+            if len(component) > self.config["densify_threshold"]:
+                for confidence in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
+                    stronger_subG = self.get_positive_subgraph(subG, confidence)
+                    stronger_components = list(nx.connected_components(stronger_subG))
+                    if all([len(c) < self.config["densify_threshold"] for c in stronger_components]):
+                        for (u, v) in [(u, v) for u, v, d in subG.edges(data=True) if d.get("label") == "positive" and d.get("confidence") <= confidence]:
+                            subG[u][v]["label"] = "negative"
+                        logger.info(f"Densified cluster of size {len(subG)} with threshold {confidence} into {[len(c) for c in stronger_components]}")
+                        break
+        
+
+    def find_inconsistent_PCCs(self, logger):
         """
         Find inconsistent Positive Connected Components, i.e. a connected components generate by positive edges, 
         with at least one negative edge between the nodes of that component.
@@ -100,23 +219,27 @@ class GraphConsistencyAlgorithm(object):
         """
         result = []
         
-        # Extract positive edges
-        positive_edges = [(u, v) for u, v, d in self.G.edges(data=True) if d.get("label") == "positive"]
-        
         # Create a subgraph with only positive edges
         positive_G = self.get_positive_subgraph(self.G)
         
         # Find connected components
-        components = nx.connected_components(positive_G)
-        
+        components = list(nx.connected_components(positive_G))
+        logger.info(f"Found connected components {len(components)}")   
+        # logger.info(f"Total positive edges: {np.sum(d.get('label') == 'negative' for _, _, d in self.G.edges(data=True))}")
+        # logger.info(f"Total negative edges: {np.sum(d.get('label') == 'positive' for _, _, d in self.G.edges(data=True))}")
         # Check each component for inconsistencies
         for component in components:
+            # logger.info(f"Nodes in component: {len(component)}")
             subG = self.G.subgraph(component)  # Get all edges within the component
             
+            # if len(component) > self.config["densify_threshold"]:
+            #     u, v, _ = min([(u,v, d["confidence"]) for u, v, d in subG.edges(data=True) if d["label"]=="positive"], key=lambda edge: edge[2])
+            #     self.G[u][v]["label"] = "negative"
             # Check for negative edges
             if any(d.get("label") == "negative" for _, _, d in subG.edges(data=True)):
                 result.append(subG)
         
+        logger.info(f"Found inconsistent components {len(result)}")   
         return result
 
 
@@ -149,7 +272,7 @@ class GraphConsistencyAlgorithm(object):
             if valid_cycles:
                 # Find the cycle with the highest minimum confidence
                 best_cycle = max(valid_cycles, key=lambda cycle: min(nonnegPCC[u][v]['confidence'] for u, v in zip(cycle, cycle[1:] + [cycle[0]])))
-
+            
                 (u, v, confidence) = min(
                     [(u, v, nonnegPCC[u][v]['confidence']) for u, v in zip(best_cycle, best_cycle[1:] + [best_cycle[0]])],
                     key=lambda edge: edge[2]

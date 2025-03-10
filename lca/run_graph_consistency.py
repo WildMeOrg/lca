@@ -90,36 +90,13 @@ def save_graph_to_cytoscape(G, filename):
 def get_positive_subgraph(G, logger):
     # Extract positive edges
     positive_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("label") == "positive"]
-    logger.info(f"positive edges {positive_edges}")
+    # logger.info(f"positive edges {positive_edges}")
     
     # Create a subgraph with only positive edges
     positive_G = G.edge_subgraph(positive_edges)
     return positive_G
 
-def get_positive_clusters(G, logger):
-    """
-    Get clustering from the graph where clusters are connected components of positive edges.
 
-    Args:
-        G (nx.Graph): The graph containing nodes and edges with labels.
-
-    Returns:
-        cluster_dict (dict): A dictionary mapping cluster IDs to sets of nodes.
-        node2cid (dict): A mapping of each node to its cluster ID.
-    """
-
-    positive_G = get_positive_subgraph(G, logger)
-    
-    # Find connected components
-    clusters = list(nx.connected_components(positive_G))
-    
-    # Convert list to a dictionary {cluster_id: set_of_nodes}
-    cluster_dict = {cid: cluster for cid, cluster in enumerate(clusters)}
-    
-    # Create a node-to-cluster ID mapping
-    node2cid = {node: cid for cid, cluster in cluster_dict.items() for node in cluster}
-
-    return cluster_dict, node2cid
 
 def run(config):
     np.random.seed(42)
@@ -142,9 +119,30 @@ def run(config):
         if u not in gt_node2cid or v not in gt_node2cid:
             return False
         return gt_node2cid[u] == gt_node2cid[v]
+
+
+
+    def basic_verifier(edge, gt_node2cid, threshold=0.7):
+        """
+        Simulated verifier that uses ground truth with some error probability.
+        
+        Args:
+            edge: tuple of (u, v, score, ranker_name)
+            gt_node2cid: ground truth cluster assignments
+            correct_prob: probability of making correct classification
+        
+        Returns:
+            tuple: (confidence, label)
+        """
+        (u, v, score, ranker_name) = edge
+        is_positive = score>threshold
+        # confidence = score if is_positive else 1 - score
+        max_range = min(1-threshold, threshold)
+        confidence = min(np.abs(score - threshold)/max_range, 1)
+        return (confidence, "positive" if is_positive else "negative")
     
 
-    def simulated_verifier(edge, gt_node2cid, correct_prob=0.8):
+    def simulated_verifier(edge, gt_node2cid, correct_prob=0.2):
         """
         Simulated verifier that uses ground truth with some error probability.
         
@@ -165,11 +163,18 @@ def run(config):
         return (confidence, "positive" if is_positive else "negative")
     
 
+    # def configured_verifier(edge):
+    #     return simulated_verifier(
+    #         edge, 
+    #         gt_node2cid,
+    #         correct_prob=lca_config.get('classifier_correct_prob', 0.2)
+    #     )
+
     def configured_verifier(edge):
-        return simulated_verifier(
+        return basic_verifier(
             edge, 
             gt_node2cid,
-            correct_prob=lca_config.get('classifier_correct_prob', 0.2)
+            threshold=0.7
         )
     
 
@@ -179,7 +184,8 @@ def run(config):
     species = config['species']
 
     lca_config["flip_threshold"] = 0.5
-
+    lca_config["negative_threshold"] = 0.5 #0.5
+    lca_config["densify_threshold"] = 10
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     if lca_config['logging'].get("update_log_file", True):
@@ -253,7 +259,7 @@ def run(config):
 
     logger.info(f"Statistics: " + ", ".join([f"{k}: {100*v:.2f}%" for (k, v) in topk_results]))
 
-
+    # print(node2uuid.keys())
 
     # Create human reviewer
     prob_human_correct = lca_config['edge_weights']['prob_human_correct']
@@ -269,10 +275,10 @@ def run(config):
     iter = 0
     max_iter = 250000
 
-    clustering, node2cid = get_positive_clusters(graph_consistency.G, logger)
+    clustering, node2cid = graph_consistency.get_positive_clusters()
     cluster_validator.trace_start_human(clustering, node2cid, get_positive_subgraph(graph_consistency.G, logger), num_human)
 
-    human_review_step = 100
+    human_review_step = 20
     print(f"Logging to {os.path.abspath(log_file)}")
     while len(all_edges)>0:# or (len(PCCs) > 0 and iter < max_iter):
         while (len(PCCs) > 0 and iter < max_iter):
@@ -281,20 +287,22 @@ def run(config):
 
             logger.info(f"Received {len(human_reviews)} human reviews")
             logger.info(f"Iteration {iter}")
-            PCCs, for_review = graph_consistency.step(iter_edges, human_reviews, ranker_name=lca_config['verifier_name'])
+            PCCs, for_review = graph_consistency.step([], human_reviews, ranker_name=lca_config['verifier_name'])
 
             if num_human - cluster_validator.prev_num_human > human_review_step:
-                clustering, node2cid = get_positive_clusters(graph_consistency.G, logger)
+                clustering, node2cid = graph_consistency.get_positive_clusters()
                 cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, get_positive_subgraph(graph_consistency.G, logger))
             iter_edges = []
             iter+=1
+        logger.info("Stopped human review stage")
         if len(all_edges) > 0:
             iter_edges = all_edges[:edges_per_iteration]
             all_edges = all_edges[edges_per_iteration:]
             PCCs, for_review = graph_consistency.step(iter_edges, [], ranker_name=lca_config['verifier_name'])
+            iter_edges = []
 
    
-    clustering, node2cid = get_positive_clusters(graph_consistency.G, logger)
+    clustering, node2cid = graph_consistency.get_positive_clusters()
     cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, get_positive_subgraph(graph_consistency.G, logger))
 
     save_graph_to_cytoscape(graph_consistency.G, "graph_cytoscape.json")
