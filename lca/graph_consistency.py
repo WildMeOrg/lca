@@ -93,22 +93,24 @@ class GraphConsistencyAlgorithm(object):
             connections[cluster_pair].append((u, v, d))
         if not connections:
             return
-        mean_confs = {pair:np.median([d for (_, _, d) in edges]) for (pair, edges) in connections.items()}
-        
+        mean_confs = {pair:np.min([d for (_, _, d) in edges]) for (pair, edges) in connections.items()}
+        mean_confs = {pair:conf for (pair, conf) in mean_confs.items() if conf < self.config["negative_threshold"]}
         # mean_confs = [(pair,np.median([d for (_, _, d) in edges])) for (pair, edges) in connections.items()]
         # mean_confs = sorted(mean_confs, key=lambda x: x[1])
-
-        min_pair = min(mean_confs, key=mean_confs.get)
-        if mean_confs[min_pair] < self.config["negative_threshold"]:
-        # for (min_pair, mean_conf) in mean_confs:
+        if not mean_confs:
+            return
+        max_pair = max(mean_confs, key=mean_confs.get)
+        logger.info(f"Max pair: {max_pair}, {mean_confs[max_pair]}")
+        if mean_confs[max_pair] < self.config["negative_threshold"]:
+        # for (max_pair, mean_conf) in mean_confs.items():
             # if mean_conf > self.config["negative_threshold"]:
             #     break
-            edges = [(u,v,c) for (u,v,c) in connections[min_pair] if not self.G[u][v]['auto_flipped']]
+            edges = [(u,v,c) for (u,v,c) in connections[max_pair] if not self.G[u][v]['auto_flipped']]
             if not edges:
                 return
             u, v, c = max(edges, key=lambda x: x[2])
             u, v = sorted([u, v])
-            logger.info(f"Flipped edge {(u, v, c)} to connect clusters {cluster_dict[min_pair[0]]} and {cluster_dict[min_pair[1]]}")
+            logger.info(f"Flipped edge {(u, v, c)} to connect clusters {cluster_dict[max_pair[0]]} and {cluster_dict[max_pair[1]]}")
             self.G[u][v]['label'] = "positive"
             self.G[u][v]['auto_flipped'] = True
 
@@ -138,7 +140,8 @@ class GraphConsistencyAlgorithm(object):
                 c1 = next(filter(lambda c: n1 in c, components), {})
                 if c0 != c1:
                     logger.info(f"Added positive edge connecting clusters of size {len(c0)} and {len(c1)}")
-                
+            # else:
+            #     logger.info(f"Negative confidence: {confidence}")
             if self.G.has_edge(n0, n1):
                 logger.info(f"Adding duplicate edge")
             self.G.add_edge(n0, n1, score=score, label=label, confidence=confidence, ranker=ranker_name, auto_flipped=False)
@@ -172,7 +175,10 @@ class GraphConsistencyAlgorithm(object):
         positive_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("label") != "negative"]
 
         # Create a subgraph with only positive edges
-        positive_G = G.edge_subgraph(positive_edges)
+        positive_G = G.edge_subgraph(positive_edges).copy()
+        singletons = [n for n in self.G.nodes() if n not in positive_G.nodes()]
+        positive_G.add_nodes_from(singletons)
+
         return positive_G
     
     def get_positive_subgraph(self, G, min_confidence=0):
@@ -180,7 +186,9 @@ class GraphConsistencyAlgorithm(object):
         positive_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("label") == "positive" and d.get("confidence") > min_confidence]
 
         # Create a subgraph with only positive edges
-        positive_G = G.edge_subgraph(positive_edges)
+        positive_G = G.edge_subgraph(positive_edges).copy()
+        singletons = [n for n in self.G.nodes() if n not in positive_G.nodes()]
+        positive_G.add_nodes_from(singletons)
         return positive_G
 
     def densify_PCCs(self, logger):

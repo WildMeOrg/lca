@@ -87,16 +87,6 @@ def save_graph_to_cytoscape(G, filename):
 
     print(f"Graph saved as Cytoscape JSON: {filename}")
 
-def get_positive_subgraph(G, logger):
-    # Extract positive edges
-    positive_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("label") == "positive"]
-    # logger.info(f"positive edges {positive_edges}")
-    
-    # Create a subgraph with only positive edges
-    positive_G = G.edge_subgraph(positive_edges)
-    return positive_G
-
-
 
 def run(config):
     np.random.seed(42)
@@ -183,7 +173,7 @@ def run(config):
     exp_name = config['exp_name']
     species = config['species']
 
-    lca_config["flip_threshold"] = 0.5
+    lca_config["flip_threshold"] = 0.5 #0.5
     lca_config["negative_threshold"] = 0.5 #0.5
     lca_config["densify_threshold"] = 10
 
@@ -276,8 +266,8 @@ def run(config):
     max_iter = 250000
 
     clustering, node2cid = graph_consistency.get_positive_clusters()
-    cluster_validator.trace_start_human(clustering, node2cid, get_positive_subgraph(graph_consistency.G, logger), num_human)
-
+    cluster_validator.trace_start_human(clustering, node2cid, graph_consistency.G, num_human)
+    
     human_review_step = 20
     print(f"Logging to {os.path.abspath(log_file)}")
     while len(all_edges)>0:# or (len(PCCs) > 0 and iter < max_iter):
@@ -291,7 +281,7 @@ def run(config):
 
             if num_human - cluster_validator.prev_num_human > human_review_step:
                 clustering, node2cid = graph_consistency.get_positive_clusters()
-                cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, get_positive_subgraph(graph_consistency.G, logger))
+                cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, graph_consistency.G)
             iter_edges = []
             iter+=1
         logger.info("Stopped human review stage")
@@ -303,7 +293,7 @@ def run(config):
 
    
     clustering, node2cid = graph_consistency.get_positive_clusters()
-    cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, get_positive_subgraph(graph_consistency.G, logger))
+    cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, graph_consistency.G)
 
     save_graph_to_cytoscape(graph_consistency.G, "graph_cytoscape.json")
     print(f"Saved log to {os.path.abspath(log_file)}")
