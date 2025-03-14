@@ -93,6 +93,17 @@ def run(config):
     random.seed(42)
     logger = logging.getLogger('lca')
 
+    lca_config = config['lca']
+    data_params = config['data']
+    exp_name = config['exp_name']
+    species = config['species']
+
+    lca_config["flip_threshold"] = 0.5 #0.5
+    lca_config["negative_threshold"] = 0.5 #0.5
+    lca_config["densify_threshold"] = 10
+
+    verifier_name = lca_config['verifier_name']
+
 
     def check_ground_truth(u, v, gt_node2cid):
         """
@@ -112,24 +123,25 @@ def run(config):
 
 
 
-    def basic_verifier(edge, gt_node2cid, threshold=0.7):
+    def basic_verifier(edge, ranker_name, threshold=0.7):
         """
         Simulated verifier that uses ground truth with some error probability.
         
         Args:
-            edge: tuple of (u, v, score, ranker_name)
+            edge: tuple of (u, v, score)
             gt_node2cid: ground truth cluster assignments
             correct_prob: probability of making correct classification
         
         Returns:
             tuple: (confidence, label)
         """
-        (u, v, score, ranker_name) = edge
+        (u, v, score) = edge
         is_positive = score>threshold
         # confidence = score if is_positive else 1 - score
         max_range = min(1-threshold, threshold)
         confidence = min(np.abs(score - threshold)/max_range, 1)
-        return (confidence, "positive" if is_positive else "negative")
+        label = "positive" if is_positive else "negative"
+        return (score, confidence, label, ranker_name)
     
 
     def simulated_verifier(edge, gt_node2cid, correct_prob=0.2):
@@ -163,19 +175,28 @@ def run(config):
     def configured_verifier(edge):
         return basic_verifier(
             edge, 
-            gt_node2cid,
-            threshold=0.7
+            ranker_name = verifier_name,
+            threshold=0.7,
         )
+
+    def human_verifier(edge):
+        (u, v, human_label) = edge
+        ranker_name = 'human'
+        score = 1 if human_label else 0
+        label = "positive" if human_label else "negative"
+        return (score, confidence, label, ranker_name)
     
 
-    lca_config = config['lca']
-    data_params = config['data']
-    exp_name = config['exp_name']
-    species = config['species']
+    def apply_verifier(edges, verifier):
+        verified_edges = []
+        for edge in edges:
+            n0, n1, human_label = edge
+            score, confidence, label, ranker_name = verifier(edge)
+            edge = (n0, n1, score, confidence, label, ranker_name)
+            verified_edges.append(edge)
+        return verified_edges
 
-    lca_config["flip_threshold"] = 0.5 #0.5
-    lca_config["negative_threshold"] = 0.5 #0.5
-    lca_config["densify_threshold"] = 10
+    
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     if lca_config['logging'].get("update_log_file", True):
@@ -200,11 +221,11 @@ def run(config):
         handler.setFormatter(get_formatter())
         logger.addHandler(handler)
 
-    graph_consistency = GraphConsistencyAlgorithm(configured_verifier, lca_config)
+    graph_consistency = GraphConsistencyAlgorithm(lca_config)
 
    
 
-    verifier_name = lca_config['verifier_name']
+    
     embeddings, uuids = load_pickle(data_params['embedding_file'])
 
     name_keys = data_params['name_keys']
@@ -242,6 +263,7 @@ def run(config):
     edges_per_iteration = 500
 
     initial_edges = all_edges[:edges_per_iteration]
+    initial_edges_verified = apply_verifier(initial_edges, configured_verifier)
     all_edges = all_edges[edges_per_iteration:]
     # print(initial_edges)
 
@@ -256,7 +278,7 @@ def run(config):
         
     human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
 
-    PCCs, for_review = graph_consistency.step(initial_edges, [], ranker_name=lca_config['verifier_name'])
+    PCCs, for_review = graph_consistency.step(initial_edges_verified)
 
     
     logger.info(f"Finished step")
@@ -273,11 +295,14 @@ def run(config):
     while len(all_edges)>0:# or (len(PCCs) > 0 and iter < max_iter):
         while (len(PCCs) > 0 and iter < max_iter):
             human_reviews = human_reviewer(for_review)
+            confidence = lca_config["edge_weights"]["prob_human_correct"]
+            human_reviews_verified = apply_verifier(human_reviews, human_verifier)
+            
             num_human += len(human_reviews)
 
             logger.info(f"Received {len(human_reviews)} human reviews")
             logger.info(f"Iteration {iter}")
-            PCCs, for_review = graph_consistency.step([], human_reviews, ranker_name=lca_config['verifier_name'])
+            PCCs, for_review = graph_consistency.step(human_reviews_verified)
 
             if num_human - cluster_validator.prev_num_human > human_review_step:
                 clustering, node2cid = graph_consistency.get_positive_clusters()
@@ -287,8 +312,9 @@ def run(config):
         logger.info("Stopped human review stage")
         if len(all_edges) > 0:
             iter_edges = all_edges[:edges_per_iteration]
+            iter_edges_verified = apply_verifier(iter_edges, configured_verifier)
             all_edges = all_edges[edges_per_iteration:]
-            PCCs, for_review = graph_consistency.step(iter_edges, [], ranker_name=lca_config['verifier_name'])
+            PCCs, for_review = graph_consistency.step(iter_edges_verified)
             iter_edges = []
 
    
