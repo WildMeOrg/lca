@@ -56,7 +56,6 @@ def run(config):
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     if lca_config['logging'].get("update_log_file", True):
-        log_file_name = f"tmp/logs/{exp_name}_{timestamp}.log"
         lca_config['logging']['log_file'] = log_file_name
 
     lca_params = generate_ga_params(lca_config)
