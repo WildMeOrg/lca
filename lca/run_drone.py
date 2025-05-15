@@ -116,7 +116,7 @@ def run(config):
 
         prob_human_correct = lca_params['prob_human_correct']
             
-        human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
+        human_reviewer = call_get_reviews(filtered_df, filter_key, prob_human_correct)
         
         
 
@@ -156,7 +156,7 @@ def run(config):
                 (n0, n1, s, verifier_name)
                 for n0, n1, s in verifier_edges
             ]
-            
+            print(f"Logging to {lca_config['logging']['log_file']}")
             cluster_changes, is_finished = lca_object.curate(verifier_edges, human_reviews)
 
             write_json(lca_object.db.clustering, clustering_file)

@@ -346,16 +346,22 @@ class ga_driver(object):  # NOQA
             self.cid_pairs.add((cid1, cid0))
 
     def find_direct_cids_and_pairs(self):
+        all_nodes = set()
         for n0, n1, _, _ in self.edge_quads:
             cid0 = self.get_cid(n0)
             cid1 = self.get_cid(n1)
+            all_nodes.add(n0)
+            all_nodes.add(n1)
             if cid0 != cid1:
                 self.add_cid_pair(cid0, cid1)
                 self.direct_cids.add(cid0)
                 self.direct_cids.add(cid1)
             else:
                 self.direct_cids.add(cid0)
-
+        self.all_nodes = all_nodes
+        # logger.info(f"All nodes: {len(tst_nodes)}, {tst_nodes}")
+        # logger.info(f"All cds: {len(self.direct_cids)}, {self.direct_cids}")
+        
 
 
     def find_indirect_cid_pairs(self):
@@ -365,6 +371,7 @@ class ga_driver(object):  # NOQA
                 outgoing_edges = self.db.edges_from_node(node)
             else:
                 outgoing_edges = self.db.edges_leaving_cluster(cid)
+            outgoing_edges = [n for n in outgoing_edges if n in self.all_nodes]
             aggregate_edges = collections.defaultdict(int)
             for n0, n1, w, _ in outgoing_edges:
                 aggregate_edges[(n0, n1)] += w
@@ -382,13 +389,13 @@ class ga_driver(object):  # NOQA
         cid_graph = nx.Graph()
         
         cid_graph.add_nodes_from(self.direct_cids)
-        
 
         for n1, n2 in self.cid_pairs:
             if cid_graph.has_edge(n1, n2):
                 cid_graph.remove_edge(n1, n2)
         
         cid_graph.add_edges_from(self.cid_pairs)
+        
         
         for cc in nx.connected_components(cid_graph):
             cids = list(cc)
@@ -397,10 +404,14 @@ class ga_driver(object):  # NOQA
             for cid in cids:
                 if self.is_temp(cid):
                     nodes.add(self.temp_cid_to_node[cid])
+                    logger.info(f"Temp cids cids: {self.temp_cid_to_node[cid]}")
                 else:
                     nodes_in_c = set(self.db.get_nodes_in_cluster(cid))
                     clustering[cid] = nodes_in_c
                     nodes |= nodes_in_c
+                    logger.info(f"Non Temp cids cids: {len(nodes_in_c)}, {nodes_in_c}")
+            logger.info(f"Direct cids: {len(nodes)}")
+        
             edges = self.db.edges_between_nodes(nodes)
             ccPIC = (edges, clustering)
             self.ccPICs.append(ccPIC)
