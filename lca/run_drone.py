@@ -12,7 +12,7 @@ import tempfile
 import argparse
 import shutil
 import datetime
-
+from human_db import human_db
 
 
 def save_probs_to_db(pos, neg, output_path, method='miewid'):
@@ -64,11 +64,17 @@ def run(config):
         logger.info(f"Using temp database...")
         db_path = tempfile.mkdtemp()
     else:
-        db_path = os.path.join(lca_config['db_path'], config['exp_name'])
+        db_path = os.path.join(data_params['output_dir'], config['exp_name'])
+        ui_db_path = data_params['ui_db_path']
         os.makedirs(db_path, exist_ok=True)
 
 
     verifier_file = lca_config['verifier_path']
+
+    use_human_reviews = True
+    if "human" not in lca_params["aug_names"]:
+        lca_params["aug_names"] = lca_params["aug_names"] + ["human"]
+        use_human_reviews = False
 
     def run_for_viewpoints(viewpoint_list, save_dir=str(db_path)):
          # verifier_file =  os.path.join(str(db_path), "verifiers_probs.json")
@@ -83,6 +89,7 @@ def run(config):
         # preprocess data
 
         name_keys = data_params['name_keys']
+        images_dir= data_params['images_dir']
         filter_key = '__'.join(name_keys)
         df = preprocess_data(data_params['annotation_file'], 
                             name_keys= name_keys,
@@ -90,7 +97,7 @@ def run(config):
                             viewpoint_list=viewpoint_list, 
                             n_filter_min=data_params['n_filter_min'], 
                             n_filter_max=data_params['n_filter_max'],
-                            images_dir = data_params['images_dir'], 
+                            images_dir=images_dir, 
                             embedding_uuids = uuids,
                             format='drone'
                         )
@@ -102,22 +109,29 @@ def run(config):
         filtered_df = df[df['uuid_x'].isin(uuids)]
         filtered_embeddings = [embeddings[uuids.index(uuid)] for uuid in filtered_df['uuid_x']]
         gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(filtered_df, filter_key)
+        write_json(node2uuid, node2uuid_file)
         cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
         ga_driver.set_validator_functions(cluster_validator.trace_start_human, cluster_validator.trace_iter_compare_to_gt)
 
 
         # create embeddings verifier
-        print(len(node2uuid.keys()))
-        print(len(filtered_embeddings))
+        # print(len(node2uuid.keys()))
+        # print(len(filtered_embeddings))
         verifier_embeddings = Embeddings(filtered_embeddings, node2uuid, distance_power=lca_params['distance_power'])
         verifier_edges = verifier_embeddings.get_edges()
 
         # create human reviewer
 
         prob_human_correct = lca_params['prob_human_correct']
-            
-        human_reviewer = call_get_reviews(filtered_df, filter_key, prob_human_correct)
+                
+        if use_human_reviews:
+            # human_reviewer = call_get_reviews(filtered_df, filter_key, prob_human_correct)
+            human_reviewer = human_db(ui_db_path, filtered_df, node2uuid)
+        else:
+            human_reviewer = lambda _: ([], True)
+
         
+        # human_reviewer.init_db(human_reviewer.db_path)
         
 
         #curate LCA
@@ -160,7 +174,6 @@ def run(config):
             cluster_changes, is_finished = lca_object.curate(verifier_edges, human_reviews)
 
             write_json(lca_object.db.clustering, clustering_file)
-            write_json(node2uuid, node2uuid_file)
 
         finally:
             if temp_db:
@@ -170,8 +183,10 @@ def run(config):
     if data_params['separate_viewpoints']:
 
         for viewpoint in data_params['viewpoint_list']:
-            print(f"Run for viewpoin {viewpoint}")
+            print(f"Run for viewpoint {viewpoint}")
             save_dir = os.path.join(str(db_path), viewpoint)
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
             viewpoint_list = [viewpoint]
             run_for_viewpoints(viewpoint_list, save_dir)
     else:

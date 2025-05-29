@@ -114,7 +114,11 @@ def is_aug_name_human(aug_name):
 class edge_generator_generic(edge_generator.edge_generator):  # NOQA
     def __init__(self, db, wgtr, verifiers):
         self.verifiers = verifiers
+        self.quit = False
         super(edge_generator_generic, self).__init__(db, wgtr)
+
+    def should_stop_cb(self):
+        return self.quit
 
     def get_edge_requests(self):
         return self.edge_requests

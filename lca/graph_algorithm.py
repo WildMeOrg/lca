@@ -184,7 +184,7 @@ Invariants:
 
 
 class graph_algorithm(object):  # NOQA
-    def __init__(self, edges, clusters, aug_names, params, aug_request_cb, aug_result_cb):
+    def __init__(self, edges, clusters, aug_names, params, aug_request_cb, aug_result_cb, should_stop_cb=None):
         self.params = params
         logger.info('======================================')
         logger.info('Construction of graph_algorithm object')
@@ -239,7 +239,7 @@ class graph_algorithm(object):  # NOQA
         self.log_return_cb = None
         self.trace_start_human_gt_cb = None
         self.trace_iter_compare_to_gt_cb = None
-        self.should_stop_cb = None
+        self.should_stop_cb = should_stop_cb
         self.progress_cb = None
 
         logger.info('Completed graph algorithm initialization')
@@ -496,12 +496,14 @@ class graph_algorithm(object):  # NOQA
 
             #  Check
             if not converged and not should_pause:
-                should_pause = self.check_wait_for_edges() or self.stop_request_check()
+                should_pause = self.check_wait_for_edges() #or self.stop_request_check()
                 if len(self.weight_mgr.waiting_for) == 0:
                     logger.info('Waiting for edges: <none>')
                 else:
                     logger.info('Waiting for edges: %a' % self.weight_mgr.waiting_for)
-
+            if self.stop_request_check():
+                halt_requested = True
+                should_pause = False
             if should_pause and logger.getEffectiveLevel() <= logging.DEBUG:
                 if len(self.weight_mgr.waiting_for) == 0:
                     logger.debug('Waiting for edges: <none>')

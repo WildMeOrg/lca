@@ -436,7 +436,8 @@ class ga_driver(object):  # NOQA
             self.ga_params['aug_names'],
             self.ga_params,
             self.edge_gen.edge_request_cb,
-            self.edge_gen.edge_result_cb
+            self.edge_gen.edge_result_cb,
+            self.edge_gen.should_stop_cb
         )
         self.active_clusters[gai.ccpic_id] = gai.clustering.keys()
         """
@@ -481,8 +482,8 @@ class ga_driver(object):  # NOQA
                 self.active_clusters[gai.ccpic_id] = gai.clustering.keys()
                 yield IterationPause(changes)
 
-        if halt_requested:
-            yield IterationHalt()
+        # if halt_requested:
+        #     yield IterationHalt()
         """
         Compute and then return the final information - the changes to
         the clusters.
