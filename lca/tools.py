@@ -97,6 +97,7 @@ def generate_ga_params(config):
     phc = float(config['edge_weights']['prob_human_correct'])
     assert 0 < phc <= 1
     ga_params['prob_human_correct'] = phc
+    ga_params['simulate_human'] = config['edge_weights']['simulate_human']
     s = config['edge_weights']['augmentation_names']
     ga_params['aug_names'] = s
 

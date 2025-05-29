@@ -71,6 +71,8 @@ def run(config):
 
     verifier_file = lca_config['verifier_path']
 
+    simulate_human = lca_params.get('simulate_human', True)
+    
     use_human_reviews = True
     if "human" not in lca_params["aug_names"]:
         lca_params["aug_names"] = lca_params["aug_names"] + ["human"]
@@ -125,8 +127,10 @@ def run(config):
         prob_human_correct = lca_params['prob_human_correct']
                 
         if use_human_reviews:
-            # human_reviewer = call_get_reviews(filtered_df, filter_key, prob_human_correct)
-            human_reviewer = human_db(ui_db_path, filtered_df, node2uuid)
+            if simulate_human:
+                human_reviewer = call_get_reviews(filtered_df, filter_key, prob_human_correct)
+            else:
+                human_reviewer = human_db(ui_db_path, filtered_df, node2uuid)
         else:
             human_reviewer = lambda _: ([], True)
 
