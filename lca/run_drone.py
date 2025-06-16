@@ -177,7 +177,9 @@ def run(config):
             print(f"Logging to {lca_config['logging']['log_file']}")
             cluster_changes, is_finished = lca_object.curate(verifier_edges, human_reviews)
             print(f"Saving result to {clustering_file}")
-            write_json({"clustering":lca_object.db.clustering, "node2uuid":node2uuid} | base_annotation, clustering_file)
+            uuid_clustering = {cluster: [node2uuid[n] for n in nodes] for (cluster, nodes) in lca_object.db.clustering.items()}
+            write_json({"clustering":uuid_clustering} | base_annotation, clustering_file)
+            
 
         finally:
             if temp_db:
