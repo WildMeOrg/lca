@@ -103,7 +103,7 @@ def run(config):
                             embedding_uuids = uuids,
                             format='drone'
                         )
-        
+        base_annotation = load_json(data_params['annotation_file'])
         print_intersect_stats(df, individual_key=filter_key)
 
     
@@ -176,8 +176,8 @@ def run(config):
             ]
             print(f"Logging to {lca_config['logging']['log_file']}")
             cluster_changes, is_finished = lca_object.curate(verifier_edges, human_reviews)
-
-            write_json(lca_object.db.clustering, clustering_file)
+            print(f"Saving result to {clustering_file}")
+            write_json({"clustering":lca_object.db.clustering} | base_annotation, clustering_file)
 
         finally:
             if temp_db:
