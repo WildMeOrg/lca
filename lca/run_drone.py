@@ -62,7 +62,7 @@ def run(config):
     lca_params = generate_ga_params(lca_config)
     
     embeddings, uuids = load_pickle(data_params['embedding_file'])
-
+    
     #create db files
     temp_db = lca_config['temp_db']
     
@@ -112,17 +112,17 @@ def run(config):
 
     # create embeddings verifier
     print(len(node2uuid.keys()))
-    print(len(embeddings))
+    # print(len(embeddings))
     verifier_embeddings = Embeddings(embeddings, node2uuid, distance_power=lca_params['distance_power'])
     verifier_edges = verifier_embeddings.get_edges()
-
+    # print(verifier_edges)
     # create human reviewer
 
     prob_human_correct = lca_params['prob_human_correct']
         
     human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
     
-    
+    print(f"Logging to {lca_config['logging']['log_file']}")
 
     #curate LCA
     try:
@@ -166,6 +166,14 @@ def run(config):
                 (n0, n1, s, verifier_name)
                 for n0, n1, s in verifier_edges
             ]
+            wgtrs = ga_driver.generate_weighters(
+                lca_params, wgtrs_calib_dict
+            )
+            all_edges_plot = []
+            for a0, a1, s, verifier_name in verifier_edges:
+                logger.info(f"a0: {a0}, a1: {a1}, s:{s}, w:{wgtrs[verifier_name].wgt(s)}")
+                all_edges_plot.append((a0, a1, s, wgtrs[verifier_name].wgt(s), gt_node2cid[int(a0)]== gt_node2cid[int(a1)]))
+            get_histogram(all_edges_plot, wgtrs[verifier_name], "drone", timestamp, wgtrs_calib_dict[verifier_name])
             
             cluster_changes, is_finished = lca_object.curate(verifier_edges, human_reviews)
 
