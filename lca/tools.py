@@ -298,3 +298,59 @@ def get_histogram(initial_edges, wgtr, species, timestamp, wgtrs_calib_dict):
     plt.title(species)
 
     plt.savefig(f'/ekaterina/work/src/lca/lca/visualisations/{species}__{timestamp}.png')
+
+
+def connect_disconnected_clusters_strongest_node(G, node2cid):
+    """
+    Connects clusters by identifying the most "important" nodes (highest edge confidence)
+    and linking disconnected clusters through them.
+
+    Args:
+        G (nx.Graph): The graph after final clustering.
+        node2cid (dict): Mapping from node to cluster ID.
+
+    Returns:
+        G (nx.Graph): Modified graph with added edges between clusters.
+        added_edges (list): List of newly added edges between clusters.
+    """
+    from collections import defaultdict
+    logger = logging.getLogger('lca')
+    cluster_to_nodes = defaultdict(list)
+    node_max_conf = defaultdict(float)
+
+    # Gather max confidence per node
+    for u, v, data in G.edges(data=True):
+        conf = data.get("confidence", 0)
+        node_max_conf[u] = max(node_max_conf[u], conf)
+        node_max_conf[v] = max(node_max_conf[v], conf)
+
+    # Group nodes by cluster
+    for node, cid in node2cid.items():
+        cluster_to_nodes[cid].append(node)
+
+    # Sort nodes in each cluster by descending edge confidence
+    cluster_representatives = {
+        cid: sorted(nodes, key=lambda x: -node_max_conf.get(x, 0))[0]
+        for cid, nodes in cluster_to_nodes.items()
+    }
+
+    cluster_ids = list(cluster_representatives.keys())
+    added_edges = set([])
+
+    for i in range(len(cluster_ids)):
+        for j in range(i + 1, len(cluster_ids)):
+            c1, c2 = cluster_ids[i], cluster_ids[j]
+            u, v = cluster_representatives[c1], cluster_representatives[c2]
+
+            # Check if an edge already exists between any node pair from c1 and c2
+            connected = any(G.has_edge(n1, n2) for n1 in cluster_to_nodes[c1] for n2 in cluster_to_nodes[c2])
+            if not connected:
+                # G.add_edge(u, v, label="added", confidence=0.0)
+                # if G.has_edge(u, v):
+                #     print("WTF")
+                added_edges.add(tuple(sorted((u, v))))
+                # print(f"Added edge between Cluster {c1} (node {u}) and Cluster {c2} (node {v})")
+                # logger.info(f"Added edge between Cluster {c1} (node {u}) and Cluster {c2} (node {v})")
+    logger.info(f"Missing {len(added_edges)} edges between clusters")
+    return added_edges
+

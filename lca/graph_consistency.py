@@ -4,7 +4,7 @@ import numpy as np
 import logging
 
 class GraphConsistencyAlgorithm(object):
-    def __init__(self, config, G=nx.Graph()):
+    def __init__(self, config, classifier, G=nx.Graph()):
         """
         Initialize the graph consistency algorithm.
 
@@ -17,6 +17,7 @@ class GraphConsistencyAlgorithm(object):
         """
         self.G = G
         self.config = config
+        self.classifier = classifier
 
     def deactivate(self, deactivator, deactivatee):
 
@@ -50,6 +51,8 @@ class GraphConsistencyAlgorithm(object):
         # 
         # self.connect_PCCs()
         PCCs = self.find_inconsistent_PCCs(logger)
+        
+        PCCs = self.densify_PCCs(PCCs)
         
         for_review = []
         logger.info(f"Received {len(new_edges)} new edges")
@@ -169,7 +172,7 @@ class GraphConsistencyAlgorithm(object):
                         old_edge["deactivator"] = None
                     
                 
-                logger.info(f"Updating existing edge")
+                logger.info(f"Updating existing edge ({n0}, {n1})")
                 self.G.edges[n0, n1]["label"] = label
                 self.G.edges[n0, n1]["confidence"] = confidence
                 self.G.edges[n0, n1]["ranker"] = ranker_name
@@ -177,29 +180,6 @@ class GraphConsistencyAlgorithm(object):
             else:
                 self.G.add_edge(n0, n1, score=score, label=label, confidence=confidence, is_active=True, inactivated_edges=set(), deactivator=None, ranker=ranker_name, auto_flipped=False)
         
-
-    # def process_human_decisions(self, human_decisions):
-    #     """
-    #     Process human decisions and modify the graph accordingly.
-
-    #     Args:
-    #         human_decisions : list of human decisions of the form [(n0, n1, "positive"|"negative")]
-    #     """
-        
-    #     logger = logging.getLogger('lca')
-    #     # Go through each human decision and update the labels in the current graph, use the confidence from the config:
-    #     for (n0, n1, human_label) in human_decisions:
-    #       new_label = "positive" if human_label else "negative"
-    #       if new_label == "positive":
-    #         positive_G = self.get_positive_subgraph(self.G)
-    #         components = list(nx.connected_components(positive_G))
-    #         c0 = next(filter(lambda c: n0 in c, components), {})
-    #         c1 = next(filter(lambda c: n1 in c, components), {})
-    #         if c0 != c1:
-    #             logger.info(f"Added human edge connecting clusters of size {len(c0)} and {len(c1)}")
-    #       self.G.edges[n0, n1]["label"] = new_label
-    #       self.G.edges[n0, n1]["confidence"] = self.config["edge_weights"]["prob_human_correct"]
-    #       self.G.edges[n0, n1]["ranker"] = "human"
 
     def get_nonnegative_subgraph(self, G):
         # Extract positive edges
@@ -222,31 +202,35 @@ class GraphConsistencyAlgorithm(object):
         positive_G.add_nodes_from(singletons)
         return positive_G
 
-    def densify_PCCs(self, logger):
+    def densify_PCCs(self, PCCs):
         """
         
         """
-        # Create a subgraph with only positive edges
-        positive_G = self.get_positive_subgraph(self.G)
         
-        # Find connected components
-        components = list(nx.connected_components(positive_G))
-        logger.info(f"Found connected components {len(components)}")   
+        logger = logging.getLogger('lca')
+        
+        updated_PCCs = []
 
-        # Check each component for inconsistencies
-        for component in components:
-            # logger.info(f"Nodes in component: {len(component)}")
-            subG = self.G.subgraph(component)  # Get all edges within the component
+        for subG in PCCs:
+            # Find missing edges by checking all pair-wise connections
+            missing_edges = []
+            nodes = list(subG.nodes())
             
-            if len(component) > self.config["densify_threshold"]:
-                for confidence in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
-                    stronger_subG = self.get_positive_subgraph(subG, confidence)
-                    stronger_components = list(nx.connected_components(stronger_subG))
-                    if all([len(c) < self.config["densify_threshold"] for c in stronger_components]):
-                        for (u, v) in [(u, v) for u, v, d in subG.edges(data=True) if d.get("label") == "positive" and d.get("confidence") <= confidence]:
-                            subG[u][v]["label"] = "negative"
-                        logger.info(f"Densified cluster of size {len(subG)} with threshold {confidence} into {[len(c) for c in stronger_components]}")
-                        break
+            for i in range(len(nodes)):
+                for j in range(i + 1, len(nodes)):
+                    n0, n1 = nodes[i], nodes[j]
+                    
+                    if not self.G.has_edge(n0, n1):
+                        missing_edges.append((n0, n1))
+            logger.info(f"Found {len(missing_edges)} missing edges")
+
+            # Add missing edges to the whole graph and then to this PCCs
+            new_edges = [self.classifier(missing_edge) for missing_edge in missing_edges]
+            self.add_new_edges(new_edges)
+            updated_PCCs.append(self.G.subgraph(subG.nodes()))
+        return updated_PCCs
+            
+
         
 
     def find_inconsistent_PCCs(self, logger):

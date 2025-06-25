@@ -109,7 +109,29 @@ class Embeddings(object):
         
         return top20_results
 
+    def get_distance_matrix(self):
+        def reduce_func(distmat, start):
+            distmat = 1 - self.get_score_from_cosine_distance(distmat)
+            # print(np.min(distmat), np.max(distmat))
+            # raise Exception("Sorry")
+            rng = np.arange(distmat.shape[0])
+            distmat[rng, rng+start] = np.inf
+            return distmat
+        
+        embeddings = self.embeddings
+        ids = self.ids
 
+        print("Calculating distances...")
+        # print(f"{len(self.embeddings)}/{len(self.ids)}")
+        chunks = pairwise_distances_chunked(
+            embeddings, #     self.embeddings/norm(self.embeddings, axis=1).reshape((-1,1)), 
+            metric='cosine', #     metric=self.get_norm_embeddings_score,
+            reduce_func=reduce_func, n_jobs=-1)#, working_memory=4)
+        distmat = np.stack(list(chunks), axis=0)
+        return distmat
+    
+    def get_uuids(self):
+        return [self.uuids[id] for id in self.ids]
     
     def get_edges(self, topk=5, target_edges=10000, uuids_filter=None):
         def reduce_func(distmat, start):

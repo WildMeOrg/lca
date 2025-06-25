@@ -242,10 +242,10 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
     scores = [s for _, _, s in verifier_edges]
     min_score = min(scores)
     max_score = max(scores)
-    delta_score = (max_score - min_score) / (num_bins-1)
+    delta_score = (max_score - min_score) / max((num_bins-1), 1)
     bins = [[] for _ in range(num_bins)]
     for n0, n1, s in verifier_edges:
-        i = int((s - min_score) / delta_score)
+        i = int((s - min_score) / max(delta_score, 1e-8))
         bins[i].append((n0, n1, s))
 
 
@@ -277,7 +277,9 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
     quit_lca = False
     while i < len(edge_nodes):
         j = min(i + num_in_batch, len(edge_nodes))
-        reviews, quit_lca = human_reviewer(edge_nodes[i: j])
+        # print(human_reviewer(edge_nodes[i: j]))
+        # reviews, quit_lca = human_reviewer(edge_nodes[i: j])
+        reviews = human_reviewer(edge_nodes[i: j])
         # if quit_lca:
         #     break
         for n0, n1, b in reviews:

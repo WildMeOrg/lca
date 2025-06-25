@@ -5,6 +5,7 @@ from embeddings_lightglue import LightglueEmbeddings
 from binary_embeddings import BinaryEmbeddings
 from synthetic_embeddings import SyntheticEmbeddings
 from random_embeddings import RandomEmbeddings
+from classifier import Classifier
 import scores.kernel_density_scores as kernel_density_scores
 # from synthetic_embeddings import SyntheticEmbeddings as Embeddings
 from curate_using_LCA import curate_using_LCA, generate_wgtr_calibration_ground_truth, generate_ground_truth_random, generate_calib_weights, generate_ground_truth_full_dataset
@@ -19,6 +20,8 @@ import argparse
 import shutil
 import datetime
 import networkx as nx
+
+from tools import connect_disconnected_clusters_strongest_node as connect_disconnected_clusters
 
 from graph_consistency import GraphConsistencyAlgorithm
 
@@ -141,7 +144,7 @@ def run(config):
         max_range = min(1-threshold, threshold)
         confidence = min(np.abs(score - threshold)/max_range, 1)
         label = "positive" if is_positive else "negative"
-        return (score, confidence, label, ranker_name)
+        return (u, v, score, confidence, label, ranker_name)
     
 
     def simulated_verifier(edge, gt_node2cid, correct_prob=0.2):
@@ -176,7 +179,8 @@ def run(config):
         return basic_verifier(
             edge, 
             ranker_name = verifier_name,
-            threshold=0.7,
+            threshold=0.85,#0.7,
+            # threshold=0.825,#0.7,
         )
 
     def human_verifier(edge):
@@ -184,16 +188,15 @@ def run(config):
         ranker_name = 'human'
         score = 1 if human_label else 0
         label = "positive" if human_label else "negative"
-        return (score, confidence, label, ranker_name)
+        return (u, v, score, confidence, label, ranker_name)
     
 
     def apply_verifier(edges, verifier):
         verified_edges = []
         for edge in edges:
             n0, n1, human_label = edge
-            score, confidence, label, ranker_name = verifier(edge)
-            edge = (n0, n1, score, confidence, label, ranker_name)
-            verified_edges.append(edge)
+            result = verifier(edge)
+            verified_edges.append(result)
         return verified_edges
 
     
@@ -221,10 +224,6 @@ def run(config):
         handler.setFormatter(get_formatter())
         logger.addHandler(handler)
 
-    graph_consistency = GraphConsistencyAlgorithm(lca_config)
-
-   
-
     
     embeddings, uuids = load_pickle(data_params['embedding_file'])
 
@@ -242,11 +241,15 @@ def run(config):
                     )
     
     print_intersect_stats(df, individual_key=filter_key)
+    
+    print(f"Logging to {os.path.abspath(log_file)}", flush=True)
 
     # create cluster validator
     filtered_df = df[df['uuid_x'].isin(uuids)]
     embeddings = [embeddings[uuids.index(uuid)] for uuid in filtered_df['uuid_x']]
     gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(filtered_df, filter_key)
+
+
 
     logger.info(f"Ground truth clustering: {gt_clustering}")
     cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
@@ -256,16 +259,26 @@ def run(config):
     }
 
     verifier_embeddings = embeddings_dict[lca_config['verifier_name']]
-        
+    # uuids = verifier_embeddings.get_uuids()
+    # embeds_dict = {"similarity_matrix":1-verifier_embeddings.get_distance_matrix(), 
+    #                'animal_ids':[filtered_df[filtered_df['uuid_x'] == uuid][filter_key].squeeze() for uuid in uuids],
+    #                'uuids':uuids,
+    #                'embeddings':np.array(verifier_embeddings.embeddings)}
+
+    # save_pickle(embeds_dict, "../gat/data.pickle")
+    # raise "stop"
 
     # Here we need to get initial edges from our ranker (MiewID, take the same code from LCA run.py)
-    all_edges = list(verifier_embeddings.get_edges(target_edges=1000000))
-    edges_per_iteration = 500
-
-    initial_edges = all_edges[:edges_per_iteration]
+    initial_edges = list(verifier_embeddings.get_edges(target_edges=0, topk=10))
+    
     initial_edges_verified = apply_verifier(initial_edges, configured_verifier)
-    all_edges = all_edges[edges_per_iteration:]
+    
     # print(initial_edges)
+
+    classifier = Classifier(verifier_name, verifier_embeddings, configured_verifier)
+    
+
+    graph_consistency = GraphConsistencyAlgorithm(lca_config, classifier=classifier)
 
     topk_results = verifier_embeddings.get_stats(filtered_df, filter_key)
 
@@ -291,38 +304,69 @@ def run(config):
     cluster_validator.trace_start_human(clustering, node2cid, graph_consistency.G, num_human)
     
     human_review_step = 20
-    print(f"Logging to {os.path.abspath(log_file)}")
-    while len(all_edges)>0:# or (len(PCCs) > 0 and iter < max_iter):
-        while (len(PCCs) > 0 and iter < max_iter):
-            human_reviews = human_reviewer(for_review)
-            confidence = lca_config["edge_weights"]["prob_human_correct"]
-            human_reviews_verified = apply_verifier(human_reviews, human_verifier)
-            
-            num_human += len(human_reviews)
+    
+    while (len(PCCs) > 0 and iter < max_iter):
+        human_reviews = human_reviewer(for_review)
+        confidence = lca_config["edge_weights"]["prob_human_correct"]
+        human_reviews_verified = apply_verifier(human_reviews, human_verifier)
+        
+        num_human += len(human_reviews)
 
-            logger.info(f"Received {len(human_reviews)} human reviews")
-            logger.info(f"Iteration {iter}")
-            PCCs, for_review = graph_consistency.step(human_reviews_verified)
+        logger.info(f"Received {len(human_reviews)} human reviews")
+        logger.info(f"Iteration {iter}")
+        PCCs, for_review = graph_consistency.step(human_reviews_verified)
 
-            if num_human - cluster_validator.prev_num_human > human_review_step:
-                clustering, node2cid = graph_consistency.get_positive_clusters()
-                cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, graph_consistency.G)
-            iter_edges = []
-            iter+=1
-        logger.info("Stopped human review stage")
-        if len(all_edges) > 0:
-            iter_edges = all_edges[:edges_per_iteration]
-            iter_edges_verified = apply_verifier(iter_edges, configured_verifier)
-            all_edges = all_edges[edges_per_iteration:]
-            PCCs, for_review = graph_consistency.step(iter_edges_verified)
-            iter_edges = []
+        if num_human - cluster_validator.prev_num_human > human_review_step:
+            clustering, node2cid = graph_consistency.get_positive_clusters()
+            cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, graph_consistency.G)
+        
+        iter+=1
 
    
-    clustering, node2cid = graph_consistency.get_positive_clusters()
+    # clustering, node2cid = graph_consistency.get_positive_clusters()
+
+    # to_add_edges = connect_disconnected_clusters(graph_consistency.G, node2cid)
+
+    # clustering, node2cid = graph_consistency.get_positive_clusters()
+    # new_edges = [graph_consistency.classifier(edge) for edge in to_add_edges]
+    # graph_consistency.add_new_edges(new_edges)
+
+    # PCCs, for_review = graph_consistency.step(initial_edges_verified)
+    # while (len(PCCs) > 0 and iter < max_iter):
+    #     human_reviews = human_reviewer(for_review)
+    #     confidence = lca_config["edge_weights"]["prob_human_correct"]
+    #     human_reviews_verified = apply_verifier(human_reviews, human_verifier)
+        
+    #     num_human += len(human_reviews)
+
+    #     logger.info(f"Received {len(human_reviews)} human reviews")
+    #     logger.info(f"Iteration {iter}")
+    #     PCCs, for_review = graph_consistency.step(human_reviews_verified)
+
+    #     if num_human - cluster_validator.prev_num_human > human_review_step:
+    #         clustering, node2cid = graph_consistency.get_positive_clusters()
+    #         cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, graph_consistency.G)
+        
+    #     iter+=1
+
+
     cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, num_human, graph_consistency.G)
 
-    save_graph_to_cytoscape(graph_consistency.G, "graph_cytoscape.json")
-    print(f"Saved log to {os.path.abspath(log_file)}")
+    db_path = os.path.join(lca_config['db_path'], config['exp_name'])
+    if ('clear_db' in lca_config) and lca_config['clear_db'] and os.path.exists(db_path):
+        logger.info("Removing old database...")
+        shutil.rmtree(db_path)
+    os.makedirs(db_path, exist_ok=True)
+    
+    clustering_file = os.path.join(str(db_path), "consistency_clustering.json")
+    node2uuid_file = os.path.join(str(db_path), "consistency_node2uuid_file.json")
+
+
+    write_json(clustering, clustering_file)
+    write_json(node2uuid, node2uuid_file)
+    print(f"Saved output to {db_path}")
+    # save_graph_to_cytoscape(graph_consistency.G, "graph_cytoscape.json")
+    # print(f"Saved log to {os.path.abspath(log_file)}")
     return
 
 
