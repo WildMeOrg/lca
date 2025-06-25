@@ -56,7 +56,7 @@ def run(config):
     lca_params = generate_ga_params(lca_config)
     
     embeddings, uuids = load_pickle(data_params['embedding_file'])
-
+    
     #create db files
     temp_db = lca_config['temp_db']
     
