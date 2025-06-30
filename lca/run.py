@@ -19,18 +19,26 @@ import argparse
 import shutil
 import datetime
 import networkx as nx
+from functools import singledispatch
 
 from graph_algorithm import graph_algorithm
 
+def numpy_converter(obj):
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    
 def save_probs_to_db(data, output_path):
     dir_name = os.path.dirname(output_path)
     
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
     
-    
     with open(output_path, 'w') as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, default=numpy_converter)
 
     return 
 

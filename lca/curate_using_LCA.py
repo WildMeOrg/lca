@@ -667,7 +667,153 @@ class curate_using_LCA(object):
 
                 
         return (cluster_changes, True)
+    
+
+    def curate_stepping(self,
+                    verifier_results,      # [(a1, a2, score)]
+                    human_reviews,        # [(a1, a2, decision)]
+                    cluster_ids_to_check = []):
+        """
+        Generator version of curate() that yields when human input is needed.
+        
+        Yields:
+            requested_edges: List of (n0, n1) pairs needing human review
+            
+        Send:
+            (review_triples, quit): Human responses and quit flag
+            
+        Returns:
+            (cluster_changes, True) when finished
+        """
+        logger = logging.getLogger('lca')
+
+        # Identical initialization to curate()
+        driver = ga_driver.ga_driver(
+            verifier_results,
+            human_reviews,
+            cluster_ids_to_check,
+            self.db,
+            self.edge_gen,
+            self.lca_config
+        )
+
+        ga_gen = driver.run_all_ccPICs(
+            yield_on_paused=True,
+        )
+
+        cluster_changes = []
+
+        while True:
+            try:
+                next_cluster_changes = next(ga_gen)
+            except StopIteration:
+                break
+            
+            if type(next_cluster_changes) is IterationPause:
+                requested_edges = self.edge_gen.get_edge_requests()
+                requested_edges = [(n0, n1) for n0, n1, _ in requested_edges]
+
+                logger.info(f'Received {len(requested_edges)} human review requests')
+
+                self.db.commit_cluster_changes(next_cluster_changes.cluster_changes, temporary=True)
+                self.save_active_clusters(driver.active_clusters, self.db.latest_clustering)
+
+                # YIELD instead of calling self.human_reviewer
+                review_triples, quit = yield requested_edges
+                
+                self.edge_gen.ingest_human_reviews(review_triples, quit)
+            else:
+                cluster_changes.append(next_cluster_changes.cluster_changes)
+                self.db.commit_cluster_changes(next_cluster_changes.cluster_changes)
+
+        return (cluster_changes, True)
 
 
+    def _convert_generic_to_lca_format(self, new_edges):
+        """
+        Convert unified edge format to LCA's expected formats.
+        
+        Args:
+            new_edges: List of edges in unified format
+            
+        Returns:
+            tuple: (verifier_edges, human_reviews)
+        """
+        verifier_edges = []
+        human_reviews = []
+        
+        for n0, n1, score, verifier_name in new_edges:
+            if "human" in verifier_name:
+                # Raw edges shouldn't contain human decisions, but handle gracefully
+                decision = (score > 0.5)  # Convert score to decision
+                human_reviews.append((n0, n1, decision))
+            else:
+                # Convert to LCA verifier format: (n0, n1, score, ranker_name)
+                verifier_edges.append((n0, n1, score, verifier_name))
+        
+        return verifier_edges, human_reviews
+
+
+    def step(self, new_edges):
+        """
+        Step-based interface compatible with GraphConsistencyAlgorithm.
+        
+        Args:
+            new_edges: List of edges in unified format:
+                    [(n0, n1, score, confidence, label, ranker_name), ...]
+            
+        Returns:
+            List of edge pairs [(n0, n1), ...] that need human review, 
+            or empty list if finished
+        """
+        verifier_edges, human_reviews = self._convert_generic_to_lca_format(new_edges)
+        
+        if not hasattr(self, '_stepper') or self._stepper is None:
+            # First call - initialize with new edges
+            self._stepper = self.curate_stepping(verifier_edges, human_reviews, [])
+            try:
+                return next(self._stepper)
+            except StopIteration:
+                self._clear_stepper()
+                return []
+        else:
+            # Subsequent calls - send human reviews
+            try:
+                quit = False  # Could be parameterized if needed
+                return self._stepper.send((human_reviews, quit))
+            except StopIteration:
+                self._clear_stepper()
+                return []
+
+
+    def _clear_stepper(self):
+        """Helper method to clear the stepper generator."""
+        self._stepper = None
+
+
+    def is_finished(self):
+        """
+        Check if the stepping process is finished.
+        
+        Returns:
+            bool: True if no active stepper (finished or not started)
+        """
+        return not hasattr(self, '_stepper') or self._stepper is None
+
+
+    def get_clustering(self):
+        """
+        Get current clustering results.
+        Compatible with GC interface.
+        
+        Returns:
+            tuple: (clustering_dict, node2cid_dict)
+        """
+        clustering = self.db.clustering
+        node2cid = self.db.node_to_cid
+        return clustering, node2cid
+    
+    def show_stats(self):
+        pass
 
 

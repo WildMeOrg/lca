@@ -15,7 +15,16 @@ from weighter import weighter
 
 
 
-
+def lazy(func):
+    func.__val = None 
+    def wrapper():
+        computed = func.__val
+        if computed:
+            return computed
+        computed = func()
+        func.__val = computed
+        return computed
+    return wrapper
 
 def load_yaml(file_path):
     logger = logging.getLogger('lca')
@@ -63,6 +72,12 @@ class SetEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, set):
             return list(obj)
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
         else:
             return json.JSONEncoder.default(self, obj)
         
@@ -97,7 +112,7 @@ def generate_ga_params(config):
     phc = float(config['edge_weights']['prob_human_correct'])
     assert 0 < phc <= 1
     ga_params['prob_human_correct'] = phc
-    ga_params['simulate_human'] = config['edge_weights']['simulate_human']
+    ga_params['simulate_human'] = config.get('edge_weights', True).get('simulate_human', True)
     s = config['edge_weights']['augmentation_names']
     ga_params['aug_names'] = s
 

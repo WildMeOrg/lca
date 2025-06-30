@@ -23,7 +23,7 @@ import networkx as nx
 
 from tools import connect_disconnected_clusters_strongest_node as connect_disconnected_clusters
 
-from graph_consistency import GraphConsistencyAlgorithm
+from graph_consistency_old import GraphConsistencyAlgorithm
 
 from graph_algorithm import graph_algorithm
 
