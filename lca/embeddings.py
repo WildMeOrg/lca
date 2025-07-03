@@ -63,7 +63,7 @@ class Embeddings(object):
     def get_top_ks(self, q_pids, distmat, ks=[1, 3, 5, 10]):
         return [(k, self.get_topk_acc(q_pids, q_pids, distmat, k)) for k in ks]
 
-    def get_stats(self, df, filter_key):
+    def get_stats(self, df, filter_key, id_key='uuid'):
         start_time = time.time()
         print("Calculating distances...")
         print(f"{len(self.embeddings)}/{len(self.ids)}")
@@ -71,7 +71,7 @@ class Embeddings(object):
         chunks, ids = self._calculate_distance_matrix()
         distmat = np.concatenate(list(chunks), axis=0)
         
-        labels = [df.loc[df['uuid_x'] == self.uuids[id], filter_key].values[0] for id in ids]
+        labels = [df.loc[df[id_key] == self.uuids[id], filter_key].values[0] for id in ids]
         top1, top3, top5, top10 = self.get_top_ks(labels, distmat, ks=[1, 3, 5, 10])
         
         return top1, top3, top5, top10

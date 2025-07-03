@@ -13,4 +13,4 @@
 
 
 # python3 run_new.py --config ./configs/config_whaleshark.yaml
-python3 run_new.py --config ./configs/config_grevyszebra.yaml -i
+python3 run_new.py --config ./configs/config_GZCD.yaml -i

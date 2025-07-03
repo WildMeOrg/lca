@@ -94,9 +94,10 @@ def prepare_common(config):
     
     # Support different preprocessing formats
     format_type = data_params.get('format', 'old')  # 'old' or 'drone'
-    
+    id_key = data_params.get('id_key', 'uuid')
     df = preprocess_data(
         data_params['annotation_file'], 
+
         name_keys=name_keys,
         convert_names_to_ids=True, 
         viewpoint_list=data_params['viewpoint_list'], 
@@ -104,6 +105,7 @@ def prepare_common(config):
         n_filter_max=data_params['n_filter_max'],
         images_dir=data_params['images_dir'], 
         embedding_uuids=uuids,
+        id_key=id_key,
         format=format_type
     )
     
@@ -111,9 +113,9 @@ def prepare_common(config):
     
     # 2. Setup ground truth and validation
     logger.info("Setting up ground truth and validation...")
-    filtered_df = df[df['uuid_x'].isin(uuids)]
-    embeddings = [embeddings[uuids.index(uuid)] for uuid in filtered_df['uuid_x']]
-    gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(filtered_df, filter_key)
+    filtered_df = df[df[id_key].isin(uuids)]
+    embeddings = [embeddings[uuids.index(uuid)] for uuid in filtered_df[id_key]]
+    gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(filtered_df, filter_key, id_key)
     
     cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
     ga_driver.set_validator_functions(
@@ -214,7 +216,7 @@ def prepare_common(config):
     
     try:
         # Log top-k accuracy statistics  
-        topk_results = primary_verifier_embeddings.get_stats(filtered_df, filter_key)
+        topk_results = primary_verifier_embeddings.get_stats(filtered_df, filter_key, id_key)
         logger.info(f"Top-k Accuracy Statistics: " + ", ".join([f"{k}: {100*v:.2f}%" for (k, v) in topk_results]))
         
         # Log detailed top-20 matches for each individual
@@ -241,6 +243,17 @@ def prepare_common(config):
     # 7. Create weighters
     weighters = ga_driver.generate_weighters(algorithm_config, weighters_calibration)
     
+    if 'output_path' in data_params:
+        output_path = data_params['output_path']
+        os.makedirs(output_path, exist_ok=True)
+    elif 'lca' in config: #  and algorithm_type == 'lca'
+        db_path = config['lca'].get('db_path', 'tmp')
+        exp_name = config.get('exp_name', 'default')
+        output_path = os.path.join(db_path, exp_name)
+        os.makedirs(output_path, exist_ok=True)
+    else:
+        output_path = 'tmp'
+    # 8. Return common data
     return {
         'embeddings_dict': embeddings_dict,
         'gt_clustering': gt_clustering,
@@ -253,7 +266,8 @@ def prepare_common(config):
         'filtered_df': filtered_df,
         'df': df,
         'filter_key': filter_key,
-        'verifier_name': verifier_name
+        'verifier_name': verifier_name,
+        'output_path': output_path
     }
 
 
@@ -395,7 +409,7 @@ def setup_logging(config):
         logger.addHandler(handler)
         
         # print(f"Logging to {os.path.abspath(log_file)}")
-    return log_file
+    return log_file, timestamp
 
 
 def prepare_lca(common_data, config):
@@ -615,10 +629,11 @@ def create_algorithm(config):
         tuple: (algorithm_instance, common_data)
     """
     # Setup logging first
-    log_file = setup_logging(config)
+    log_file, timestamp = setup_logging(config)
     
     # Prepare common data
     common_data = prepare_common(config)
+    common_data['timestamp'] = timestamp
     
     # Create algorithm based on config
     algorithm_type = config.get('algorithm_type', 'lca')  # Default to LCA

@@ -811,7 +811,7 @@ class curate_using_LCA(object):
         """
         clustering = self.db.clustering
         node2cid = self.db.node_to_cid
-        return clustering, node2cid
+        return clustering, node2cid, self.db.edge_graph
     
     def show_stats(self):
         pass

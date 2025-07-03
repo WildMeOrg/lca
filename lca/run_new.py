@@ -6,7 +6,7 @@ Core execution logic that works for any algorithm with step() interface.
 import argparse
 import logging
 from init_logger import init_logger
-from tools import get_config
+from tools import get_config, write_json
 from algorithm_preparation import create_algorithm
 import os
 
@@ -87,7 +87,18 @@ def run(config):
         algorithm.show_stats()
         
         # Return results
-        return algorithm.get_clustering()
+        result = algorithm.get_clustering()
+
+        (clustering_dict, node2cid_dict, G) = result
+        output_path = common_data.get('output_path', 'tmp')
+        if 'timestamp' in common_data:
+            output_path = output_path + '_' + common_data['timestamp']
+        os.makedirs(output_path, exist_ok=True)
+        write_json(clustering_dict, os.path.join(output_path, 'clustering.json'))
+        write_json(node2cid_dict, os.path.join(output_path, 'node2cid.json'))
+        write_json(common_data['node2uuid'], os.path.join(output_path, 'node2uuid.json'))
+        write_json(G, os.path.join(output_path, 'graph.json'))
+        return result
     
     finally:
         # Cleanup temp database if needed
@@ -112,6 +123,7 @@ def parse_args():
                    help='Enable interactive mode')
     return parser.parse_args()
 
+ 
 
 if __name__ == '__main__':
     init_logger()

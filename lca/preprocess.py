@@ -39,9 +39,9 @@ def filter_viewpoint_df(df, viewpoint_list):
     print('     ', len(df), 'annotations remain after filtering by viewpoint list', viewpoint_list)
     return df
 
-def filter_uuids_df(df, uuids_list):
+def filter_uuids_df(df, uuids_list, id_key='uuid'):
     print(uuids_list)
-    df = df[df['uuid_x'].isin(uuids_list)]
+    df = df[df[id_key].isin(uuids_list)]
     print('     ', len(df), 'annotations remain after filtering by given uuids')
     return df
 
@@ -60,9 +60,9 @@ def convert_name_to_id(names):
     names_id = le.fit_transform(names)
     return names_id
 
-def filter_df(df, viewpoint_list, n_filter_min, n_subsample_max, embedding_uuids, filter_key='name'):
+def filter_df(df, viewpoint_list, n_filter_min, n_subsample_max, embedding_uuids, filter_key='name', id_key='uuid'):
     if embedding_uuids:
-        df = filter_uuids_df(df, embedding_uuids)
+        df = filter_uuids_df(df, embedding_uuids, id_key)
 
     if viewpoint_list:
         df = filter_viewpoint_df(df, viewpoint_list)
@@ -78,7 +78,7 @@ def filter_df(df, viewpoint_list, n_filter_min, n_subsample_max, embedding_uuids
 
     return df
 
-def preprocess_data(anno_path, name_keys=['name'], convert_names_to_ids=True, viewpoint_list=None, n_filter_min=None, n_filter_max=None, images_dir=None, embedding_uuids=None, format='standard'):
+def preprocess_data(anno_path, name_keys=['name'], convert_names_to_ids=True, viewpoint_list=None, n_filter_min=None, n_filter_max=None, images_dir=None, embedding_uuids=None, id_key='uuid', format='standard'):
 
     df = load_to_df(anno_path, format)
 
@@ -86,7 +86,7 @@ def preprocess_data(anno_path, name_keys=['name'], convert_names_to_ids=True, vi
     df[filter_key] = df[name_keys].apply(lambda row: '_'.join(row.values.astype(str)), axis=1)
     
 
-    df = filter_df(df, viewpoint_list, n_filter_min, n_filter_max, embedding_uuids, filter_key=filter_key)
+    df = filter_df(df, viewpoint_list, n_filter_min, n_filter_max, embedding_uuids, filter_key=filter_key, id_key=id_key)
 
     if convert_names_to_ids:
         names = df[filter_key].values
@@ -100,10 +100,10 @@ def preprocess_data(anno_path, name_keys=['name'], convert_names_to_ids=True, vi
     return df
 
 
-def save_data(df, output_path):
-    df_annotations_fields = ['uuid_x', 'image_uuid', 'bbox', 'theta', 'name', 'viewpoint', 'name_viewpoint','category_id']
+def save_data(df, output_path, id_key='uuid'):
+    df_annotations_fields = [id_key, 'image_uuid', 'bbox', 'theta', 'name', 'viewpoint', 'name_viewpoint','category_id']
     df_annotations = df[df_annotations_fields]
-    df_annotations = df_annotations.rename(columns={'uuid_x': 'uuid'})
+    # df_annotations = df_annotations.rename(columns={id_key: 'uuid'})
 
 
     df_images_fields = ['image_uuid', 'file_name', 'height', 'width', 'date_captured']

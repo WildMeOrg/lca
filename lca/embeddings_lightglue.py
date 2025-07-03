@@ -40,12 +40,12 @@ class LightglueEmbeddings(object):
         return [(k, self.get_topk_acc(q_pids, q_pids, distmat, k)) for k in ks]
 
 
-    def get_stats(self, df, filter_key):
+    def get_stats(self, df, filter_key, id_key='uuid'):
         
         print("Calculating distances...")
         
         distmat = self.scores
-        labels = [df.loc[df['uuid_x'] == self.uuids_dict[id], filter_key].values[0] for id in self.ids]
+        labels = [df.loc[df[id_key] == self.uuids_dict[id], filter_key].values[0] for id in self.ids]
         
         top1, top3, top5, top10 = self.get_top_ks(labels, distmat, ks=[1,3,5,10])
 
@@ -53,10 +53,10 @@ class LightglueEmbeddings(object):
         return top1, top3, top5, top10
 
 
-    def get_top20_matches(self, df, filter_key):
+    def get_top20_matches(self, df, filter_key, id_key='uuid'):
         
         distmat = self.scores
-        labels = [df.loc[df['uuid_x'] == self.uuids_dict[id], filter_key].values[0] for id in self.ids]
+        labels = [df.loc[df[id_key] == self.uuids_dict[id], filter_key].values[0] for id in self.ids]
 
         top20_results = {}
 

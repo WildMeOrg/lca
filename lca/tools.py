@@ -4,6 +4,7 @@ import json
 import random
 import logging
 import cluster_tools as ct
+import networkx as nx
 from init_logger import get_formatter
 
 import matplotlib.pyplot as plt
@@ -14,6 +15,8 @@ import numpy as np
 from weighter import weighter
 
 
+def order_edge(u, v):
+    return (min(u, v), max(u, v))
 
 def lazy(func):
     func.__val = None 
@@ -78,6 +81,8 @@ class SetEncoder(json.JSONEncoder):
             return float(obj)
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
+        elif isinstance(obj, nx.Graph):
+            return nx.cytoscape_data(obj)
         else:
             return json.JSONEncoder.default(self, obj)
         
@@ -189,7 +194,7 @@ def generate_ga_params(config):
 
     return ga_params
 
-def generate_gt_clusters(df, name_key):
+def generate_gt_clusters(df, name_key, id_key='uuid'):
     gt_node2cid = {}
     cids_unique = df[name_key].unique()
     cids = [f'ct{idx}' for idx in range(len(cids_unique))]
@@ -201,7 +206,7 @@ def generate_gt_clusters(df, name_key):
         cid = cids[list(cids_unique).index(row[name_key])]
         gt_clustering[cid].append(i)
         gt_node2cid[i] = cid
-        node2uuid[i] = row['uuid_x']
+        node2uuid[i] = row[id_key]
 
     gt_clustering = {
         cid: set(cluster) for cid, cluster in gt_clustering.items()

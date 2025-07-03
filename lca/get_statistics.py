@@ -55,9 +55,9 @@ def prepare_reduce_func():
     return reduce_func
 
 
-def get_stats(df, filter_key, embeddings):
+def get_stats(df, filter_key, embeddings, id_key='uuid'):
     """Compute statistics based on distance matrix and top-k accuracy."""
-    uuids = {i: row['uuid_x'] for i, row in df.iterrows()}
+    uuids = {i: row[id_key] for i, row in df.iterrows()}
     ids = list(uuids.keys())
 
     reduce_func = prepare_reduce_func()
@@ -66,7 +66,7 @@ def get_stats(df, filter_key, embeddings):
     distmat = calculate_distances(embeddings, ids, uuids, reduce_func)
 
     # Map labels and compute top-k accuracies
-    labels = [df.loc[df['uuid_x'] == uuids[id], filter_key].values[0] for id in ids]
+    labels = [df.loc[df[id_key] == uuids[id], filter_key].values[0] for id in ids]
     return get_top_ks(labels, distmat, ks=[1, 3, 5, 10])
 
 

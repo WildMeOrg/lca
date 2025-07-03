@@ -11,7 +11,8 @@ class BinaryEmbeddings(object):
     def __init__(self,
                  ids,
                  df,
-                 filter_key):
+                 filter_key,
+                 id_key='uuid'):
         """
         Initialize BinaryEmbedding with embeddings, ids, and their corresponding labels
         
@@ -22,7 +23,7 @@ class BinaryEmbeddings(object):
         """
         self.uuids = ids
         self.ids = list(ids.keys())
-        self.labels = [df.loc[df['uuid_x'] == self.uuids[id], filter_key].values[0] for id in self.ids]
+        self.labels = [df.loc[df[id_key] == self.uuids[id], filter_key].values[0] for id in self.ids]
         self.num_requests = 0
 
     def get_score(self, id1, id2):

@@ -18,9 +18,9 @@ class MetadataEmbeddings:
     Returns 0.0 for implausible matches, original score for plausible matches.
     """
     
-    def __init__(self, base_embeddings, data_df, node2uuid):
+    def __init__(self, base_embeddings, data_df, node2uuid, id_key='uuid'):
         self.base_embeddings = base_embeddings
-        self.metadata_filter = metadata_verifier(data_df, node2uuid)
+        self.metadata_filter = metadata_verifier(data_df, node2uuid, id_key)
         
         logger.info(f"Created MetadataEmbeddings wrapping {type(base_embeddings).__name__}")
     
@@ -106,7 +106,7 @@ class MetadataEmbeddings:
         """Delegate other methods to base embeddings."""
         return getattr(self.base_embeddings, name)
     
-    def get_stats(self, df, filter_key):
+    def get_stats(self, df, filter_key, id_key='uuid'):
         """Get statistics with metadata filtering applied."""
         start_time = time.time()
         print("Calculating distances with metadata filtering...")
@@ -127,23 +127,24 @@ class MetadataEmbeddings:
         distmat = np.concatenate(filtered_chunks, axis=0)
         
         # Get labels and compute top-k statistics on filtered matrix
-        labels = [df.loc[df['uuid_x'] == self.base_embeddings.uuids[id], filter_key].values[0] for id in ids]
+        labels = [df.loc[df[id_key] == self.base_embeddings.uuids[id], filter_key].values[0] for id in ids]
         top1, top3, top5, top10 = self.base_embeddings.get_top_ks(labels, distmat, ks=[1, 3, 5, 10])
         
         return top1, top3, top5, top10
 
 class metadata_verifier(object):
-    def __init__(self, data_df, node2uuid):
+    def __init__(self, data_df, node2uuid, id_key='uuid'):
         self.data_df = data_df
         self.node2uuid = node2uuid
         self.uuid2node = {val:key for (key, val) in node2uuid.items()}
+        self.id_key = id_key
 
     def get_image_metadata(self, uuid):
         # Get the file_name from the dataframe
-        longitude = self.data_df.loc[self.data_df['uuid_x'] == uuid, "longitude"].squeeze()
-        latitude = self.data_df.loc[self.data_df['uuid_x'] == uuid, "latitude"].squeeze()
-        datetime = self.data_df.loc[self.data_df['uuid_x'] == uuid, "datetime"].squeeze()
-        file_name = self.data_df.loc[self.data_df['uuid_x'] == uuid, "file_name"].squeeze()
+        longitude = self.data_df.loc[self.data_df[self.id_key] == uuid, "longitude"].squeeze()
+        latitude = self.data_df.loc[self.data_df[self.id_key] == uuid, "latitude"].squeeze()
+        datetime = self.data_df.loc[self.data_df[self.id_key] == uuid, "datetime"].squeeze()
+        file_name = self.data_df.loc[self.data_df[self.id_key] == uuid, "file_name"].squeeze()
         return [str(longitude), str(latitude), str(datetime), str(file_name)]
 
     def convert_query(self, n0, n1):

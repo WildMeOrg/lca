@@ -4,11 +4,12 @@ import os
 from pathlib import Path
 
 class human_db(object):
-    def __init__(self, db_path, data_df, node2uuid):
+    def __init__(self, db_path, data_df, node2uuid, id_key='uuid'):
         self.db_path = db_path
         self.data_df = data_df
         self.node2uuid = node2uuid
         self.uuid2node = {val:key for (key, val) in node2uuid.items()}
+        self.id_key = id_key
 
     def init_db(self, db_path="./zebra_verification.db"):
         conn = sqlite3.connect(db_path)
@@ -33,7 +34,7 @@ class human_db(object):
 
     def get_image_path(self, uuid):
         # Get the file_name from the dataframe
-        file_name = self.data_df.loc[self.data_df['uuid_x'] == uuid, "file_name"].squeeze()
+        file_name = self.data_df.loc[self.data_df[self.id_key] == uuid, "file_name"].squeeze()
         return str(file_name)
 
     def convert_query(self, n0, n1):

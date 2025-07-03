@@ -1,47 +1,57 @@
-exp_name: default_experiment         # Name of the experiment
-comment: Experiment comment goes here 
-
+exp_name: grevyszebra_consistency
+species: Grevys zebra
+comment: Experiment comment goes here
+algorithm_type: gc
 data:
-  images_dir: 'images'               # Directory where images are stored, not in use right now but will be necessary for human verifier later
-  viewpoint_list: ['right', 'left']  # List of viewpoints; annotation with other viewpoints will be excluded
-  name_keys: ['name', 'viewpoint']   
-  # List of keys that construct an individual ID. 
-  #For example, if 'name_keys' are set to ['name', 'viewpoint'], 
-  #all annotations where 'name' and 'viewpoint' are the same 
-  #will be considered as belonging to the same class.
-  
-  n_filter_min: 2                    # Minimum number of annotations per class
-  n_filter_max: 10                   # Maximum number of annotations per class
-  annotation_file: test.json         # json annotation file
-  embedding_file: embeddings.pickle  
-  # File containing embeddings, will be read as 
-  #embeddings, uuids = load_pickle(data_params['embedding_file'])
-
+  images_dir: /ekaterina/work/data/zebra/images
+  viewpoint_list:
+  - right
+  name_keys:
+  - name_viewpoint
+  id_key: annot_uuid
+  n_filter_min: 1
+  n_filter_max: 10
+  annotation_file: /ekaterina/work/data/zebra/annotations/zebra_duplicates.json
+  embedding_file: /ekaterina/work/src/MiewID/wbia_miew_id/output/embeddings/zebra_embeddings_duplicates.pickle
+  stats_file: tmp/zebra_baseline_prob_098.json
+algorithm:
+  target_edges: 0
+  initial_topk: 10
 lca:
-  verifier_name: 'miewid'            # Name of the verifier algorithm
-  db_path: tmp/zebra_db              # Path to the database where rrsults are stored
-  distance_power: 1
-  temp_db: True
-
-  edge_weights:                      # weight calibration params
-    prob_human_correct: 0.98         # Probability that a human verification is correct, needed for human review simulation
-    augmentation_names: miewid human # Names of augmentations to be used
-    num_pos_needed: 50               # Number of positive samples needed
-    num_neg_needed: 50               # Number of negative samples needed
-    scorer: 'exp'                    # Scorer function, one of ['exp', 'gamma']
-
-  iterations:                         #lca params
-    min_delta_converge_multiplier: 0.95 
-    min_delta_stability_ratio: 8         
-    num_per_augmentation: 2              
-    tries_before_edge_done: 4            
-    ga_iterations_before_return: 10      
-    ga_max_num_waiting: 50               
-
-  logging:
-    log_level: INFO                     # Level of logging (e.g., DEBUG, INFO, WARNING)
-    log_file: tmp/zebra.log             # File where logs will be saved
-
+  verifier_name: miewid
+  db_path: tmp
+  temp_db: false
+  clear_db: true
+  distance_power: 2
+  theta: 0.1 
+  iterations:
+    min_delta_converge_multiplier: 0.95
+    min_delta_stability_ratio: 4
+    num_per_augmentation: 2
+    tries_before_edge_done: 1
+    ga_iterations_before_return: 10
+    ga_max_num_waiting: 50
+    max_human_decisions: 5000
+    should_densify: true
+    densify_min_number_human: 10
+    densify_min_edges: 10
+    densify_frac: 0.5
   drawing:
-    draw_iterations: False              
-    drawing_prefix: drawing_lca         
+    draw_iterations: false
+    drawing_prefix: drawing_lca
+edge_weights:
+  prob_human_correct: 0.98
+  augmentation_names: miewid simulated_human
+  num_pos_needed: 300
+  num_neg_needed: 50
+  scorer: kde
+  classifier_thresholds:
+    miewid: 0.85
+  verifier_names: miewid simulated_human
+logging:
+  log_level: INFO
+  log_file: tmp/logs/whaleshark_kde.log
+gc:
+  verifier_name: miewid
+  theta: 0.1
+  validation_step: 20

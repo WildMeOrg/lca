@@ -2,6 +2,7 @@
 import networkx as nx
 import numpy as np
 import logging
+from tools import order_edge
 
 # Update to graph_consistency.py
 
@@ -29,7 +30,7 @@ class GraphConsistencyAlgorithm(object):
         logger = logging.getLogger('lca')
         final_for_review = []
         for n0, n1 in edges_for_human:
-            edge_key = (min(n0, n1), max(n0, n1))
+            edge_key = order_edge(n0, n1)
             attempts = self.human_attempts.get(edge_key, 0)
             
             if attempts < self.tries_before_edge_done:
@@ -86,8 +87,8 @@ class GraphConsistencyAlgorithm(object):
         
         # Initial validation after first step
         if not self.validation_initialized:
-            clustering, node2cid = self.get_clustering()
-            self.cluster_validator.trace_start_human(clustering, node2cid, self.G, self.num_human_reviews)
+            clustering, node2cid, G = self.get_clustering()
+            self.cluster_validator.trace_start_human(clustering, node2cid, G, self.num_human_reviews)
             self.validation_initialized = True
             return
         
@@ -101,8 +102,8 @@ class GraphConsistencyAlgorithm(object):
                 self.show_stats()
         
     def show_stats(self):
-        clustering, node2cid = self.get_clustering()
-        self.cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, self.num_human_reviews, self.G)
+        clustering, node2cid, G = self.get_clustering()
+        self.cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, self.num_human_reviews, G)
 
     def densify_iPCCs(self, iPCCs):
         """Add missing edges using classifier system."""
@@ -134,7 +135,7 @@ class GraphConsistencyAlgorithm(object):
         n0, n1 = deactivator
         d0, d1 = deactivatee
 
-        deativated_tuple = tuple(sorted([d0, d1]))
+        deativated_tuple = order_edge(d0, d1)
 
         self.G.edges[n0, n1]['inactivated_edges'].add(deativated_tuple)
 
@@ -160,7 +161,7 @@ class GraphConsistencyAlgorithm(object):
         Returns:
             tuple: (clustering_dict, node2cid_dict)
         """
-        return self.get_positive_clusters()
+        return (*self.get_positive_clusters(), self.G)
 
     def get_positive_clusters(self):
         """
@@ -201,7 +202,7 @@ class GraphConsistencyAlgorithm(object):
                           node2cid.get(u, -1) != node2cid.get(v, -2)]
         connections = {}
         for (u, v, d) in all_negative_edges:
-            cluster_pair = tuple(sorted([node2cid[u], node2cid[v]]))
+            cluster_pair = order_edge(node2cid[u], node2cid[v])
             if cluster_pair not in connections:
                 connections[cluster_pair] = []
             connections[cluster_pair].append((u, v, d))
@@ -223,7 +224,7 @@ class GraphConsistencyAlgorithm(object):
             if not edges:
                 return
             u, v, c = max(edges, key=lambda x: x[2])
-            u, v = sorted([u, v])
+            u, v = order_edge(u, v)
             logger.info(f"Flipped edge {(u, v, c)} to connect clusters {cluster_dict[max_pair[0]]} and {cluster_dict[max_pair[1]]}")
             self.G[u][v]['label'] = "positive"
             self.G[u][v]['auto_flipped'] = True
@@ -263,13 +264,13 @@ class GraphConsistencyAlgorithm(object):
         
             confidence = np.clip(confidence, 0, 1)
             # print(f"adding edge ... {n0}, {n1} {score}")
-            if label == "positive":
-                positive_G = self.get_positive_subgraph(self.G)
-                components = list(nx.connected_components(positive_G))
-                c0 = next(filter(lambda c: n0 in c, components), {})
-                c1 = next(filter(lambda c: n1 in c, components), {})
-                if c0 != c1:
-                    logger.info(f"Added positive edge {n0, n1, float(score), float(confidence)} connecting clusters of size {max(len(c0), 1)} and {max(len(c1), 1)}")
+            # if label == "positive":
+            #     positive_G = self.get_positive_subgraph(self.G)
+            #     components = list(nx.connected_components(positive_G))
+            #     c0 = next(filter(lambda c: n0 in c, components), {})
+            #     c1 = next(filter(lambda c: n1 in c, components), {})
+            #     if c0 != c1:
+            #         logger.info(f"Added positive edge {n0, n1, float(score), float(confidence)} connecting clusters of size {max(len(c0), 1)} and {max(len(c1), 1)}")
             # else:
             #     logger.info(f"Negative confidence: {confidence}")
             if self.G.has_edge(n0, n1):
@@ -283,7 +284,7 @@ class GraphConsistencyAlgorithm(object):
                         old_edge['is_active'] = True
                         d0, d1 = old_edge["deactivator"]
 
-                        self.G.edges[d0, d1]['inactivated_edges'].remove(tuple(sorted([n0, n1])))
+                        self.G.edges[d0, d1]['inactivated_edges'].remove(order_edge(n0, n1))
                         old_edge["deactivator"] = None
                     
                 
@@ -397,13 +398,13 @@ class GraphConsistencyAlgorithm(object):
                     if abs(min_confidence - neg_confidence) > self.config['theta']:
                         self.deactivate((u,v), (n0, n1))
                     else:
-                        result.add((n0, n1, self.G[n0][n1].get('ranker', None)))
+                        result.add((*order_edge(n0, n1), self.G[n0][n1].get('ranker', None)))
 
                 else:
                     if abs(min_confidence - neg_confidence) > self.config['theta']:
                         self.deactivate((n0, n1), (u,v))
                     else:
-                        result.add((u, v, self.G[u][v].get('ranker', None)))
+                        result.add((*order_edge(u, v), self.G[u][v].get('ranker', None)))
                 
             nonnegiPCC.remove_edge(n0, n1)
         
