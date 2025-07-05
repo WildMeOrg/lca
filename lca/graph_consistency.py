@@ -13,7 +13,7 @@ class GraphConsistencyAlgorithm(object):
             classifier_manager: Handles single or multiple classifiers uniformly
             cluster_validator: Optional validation against ground truth
         """
-        self.G = G
+        self.G = G.copy()
         self.config = config
         self.classifier_manager = classifier_manager
         self.cluster_validator = cluster_validator

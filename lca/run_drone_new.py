@@ -8,7 +8,7 @@ import tempfile
 import shutil
 from init_logger import init_logger
 from tools import get_config
-from run import run
+from run_new import run
 
 def run_for_viewpoints(config, viewpoint_list, save_dir):
     """Run algorithm for specific viewpoints."""
@@ -16,6 +16,7 @@ def run_for_viewpoints(config, viewpoint_list, save_dir):
     config_copy = config.copy()
     config_copy['data'] = config_copy['data'].copy()
     config_copy['data']['viewpoint_list'] = viewpoint_list
+    config_copy['data']['output_path'] = save_dir
     
     # Override save directory for LCA if needed (backwards compatible)
     algorithm_type = config_copy.get('algorithm_type', 'lca')
@@ -39,9 +40,9 @@ def main(config):
     
     if temp_db:
         db_path = tempfile.mkdtemp()
-    else:
-        db_path = os.path.join(data_params['output_dir'], config['exp_name'])
-        os.makedirs(db_path, exist_ok=True)
+    elif "output_path" in data_params:
+        db_path = os.path.join(data_params['output_path'], config['exp_name'])
+    os.makedirs(db_path, exist_ok=True)
     
     try:
         if data_params.get('separate_viewpoints', False):

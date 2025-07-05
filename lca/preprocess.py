@@ -20,13 +20,13 @@ def load_to_df(anno_path,format='standard'):
     merge_on_uuid = 'image_uuid' in dfa.columns and 'uuid' in dfi.columns
     if merge_on_uuid:
         print('Merging on image uuid')
-        df = dfa.merge(dfi, left_on='image_uuid', right_on='uuid')
+        df = dfa.merge(dfi, left_on='image_uuid', right_on='uuid', suffixes=('', '_y'))
     else:
-        df = dfa.merge(dfi, left_on='image_id', right_on='id') 
+        df = dfa.merge(dfi, left_on='image_id', right_on='id', suffixes=('', '_y')) 
 
     if format == 'standard':
-        df = df.merge(dfn, left_on='individual_uuid', right_on='uuid')
-        df = df.merge(dfc, left_on='category_id', right_on='id')
+        df = df.merge(dfn, left_on='individual_uuid', right_on='uuid', suffixes=('', '_y'))
+        df = df.merge(dfc, left_on='category_id', right_on='id', suffixes=('',   '_y'))
 
 
     print(f'** Loaded {anno_path} **')
@@ -40,7 +40,8 @@ def filter_viewpoint_df(df, viewpoint_list):
     return df
 
 def filter_uuids_df(df, uuids_list, id_key='uuid'):
-    print(uuids_list)
+    # print(uuids_list)
+    print(df.columns)
     df = df[df[id_key].isin(uuids_list)]
     print('     ', len(df), 'annotations remain after filtering by given uuids')
     return df
