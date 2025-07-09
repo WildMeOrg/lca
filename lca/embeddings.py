@@ -75,6 +75,13 @@ class Embeddings(object):
         top1, top3, top5, top10 = self.get_top_ks(labels, distmat, ks=[1, 3, 5, 10])
         
         return top1, top3, top5, top10
+    
+    def get_all_scores(self):
+        chunks, ids = self._calculate_distance_matrix()
+        distmat = np.concatenate(list(chunks), axis=0)
+        all_inds_y, all_inds_x = np.triu_indices(n=distmat.shape[0], m=distmat.shape[1], k=1)
+        scores = [1-distmat[y, x] for y,x in zip(all_inds_y, all_inds_x)]
+        return scores
 
     def get_top20_matches(self, df, filter_key):
         start_time = time.time()

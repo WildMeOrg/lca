@@ -218,7 +218,7 @@ def prepare_common(config):
         # Log top-k accuracy statistics  
         topk_results = primary_verifier_embeddings.get_stats(filtered_df, filter_key, id_key)
         logger.info(f"Top-k Accuracy Statistics: " + ", ".join([f"{k}: {100*v:.2f}%" for (k, v) in topk_results]))
-        
+
         # Log detailed top-20 matches for each individual
         # top20_results = primary_verifier_embeddings.get_top20_matches(filtered_df, filter_key)
         # for uuid, top20 in top20_results.items():
@@ -243,6 +243,33 @@ def prepare_common(config):
     # 7. Create weighters
     weighters = ga_driver.generate_weighters(algorithm_config, weighters_calibration)
     
+    if "histogram_path" in config.get("logging", {}):
+        histogram_path = config["logging"]["histogram_path"]
+        plt.figure()
+
+        scores = primary_verifier_embeddings.get_all_scores()
+        print(f"MAX: {np.max(scores)}")
+        plt.hist(scores, bins=35, density=True, alpha=0.6, color='g')
+
+        xs = np.linspace(0, 1, 100)
+        wgtr = weighters[verifier_name]
+        pos_ys = [wgtr.scorer.get_pos_neg(x)[0] for x in xs]
+        neg_ys = [wgtr.scorer.get_pos_neg(x)[1] for x in xs]
+
+        plt.plot(xs, pos_ys, color='g')
+        plt.plot(xs, neg_ys, color='r')
+
+        # wgtr = weighter.weighter(scorer, config["lca"]["edge_weights"]['prob_human_correct'])
+        wgtr.max_weight = 10
+        
+        plt.plot(xs, [wgtr.wgt_smooth(x) for x in xs], 'k-')
+
+        plt.xlabel("Score")
+        plt.ylabel("Probability density function")
+        plt.title(config.get("species", ""))
+
+        plt.savefig(histogram_path)
+
     if 'output_path' in data_params:
         output_path = data_params['output_path']
         os.makedirs(output_path, exist_ok=True)
