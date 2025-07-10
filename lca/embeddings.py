@@ -6,7 +6,7 @@ from scipy.spatial.distance import cosine
 from sklearn.metrics import pairwise_distances, pairwise_distances_chunked
 from sklearn.metrics.pairwise import cosine_similarity
 import sklearn
-
+import functools
 
 class Embeddings(object):
     def __init__(self, embeddings, ids, distance_power=1):
@@ -21,7 +21,8 @@ class Embeddings(object):
         rng = np.arange(distmat.shape[0])
         distmat[rng, rng + start] = np.inf
         return distmat
-
+    
+    
     def _calculate_distance_matrix(self, embeddings=None, ids=None):
         """Calculate distance matrix using chunked computation."""
         if embeddings is None:
@@ -76,6 +77,7 @@ class Embeddings(object):
         
         return top1, top3, top5, top10
     
+    @functools.cache
     def get_all_scores(self):
         chunks, ids = self._calculate_distance_matrix()
         distmat = np.concatenate(list(chunks), axis=0)

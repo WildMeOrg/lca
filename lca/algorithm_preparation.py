@@ -83,6 +83,11 @@ def prepare_common(config):
     random.seed(42)
     
     data_params = config['data']
+    images_dir = data_params.get('images_dir', None)
+    if images_dir == "None":
+        images_dir = None
+
+    data_params['images_dir'] = images_dir
     algorithm_config = config.get('lca', config.get('gc', {}))  # Fallback to available config
     
     # 1. Load and preprocess data
@@ -242,7 +247,7 @@ def prepare_common(config):
     
     # 7. Create weighters
     weighters = ga_driver.generate_weighters(algorithm_config, weighters_calibration)
-    
+
     if "histogram_path" in config.get("logging", {}):
         histogram_path = config["logging"]["histogram_path"]
         plt.figure()
@@ -616,6 +621,8 @@ def prepare_gc(common_data, config):
             if name in classifier_thresholds:
                 # Use threshold-based classifier
                 threshold = classifier_thresholds[name]
+                if isinstance(threshold, str) and "auto" in threshold:
+                    threshold = find_robust_threshold(np.array(embeddings.get_all_scores()))
                 classifier = ThresholdBasedClassifier(threshold)
                 logger.info(f"Created threshold-based classifier for {name} with threshold {threshold}")
             elif name in common_data['weighters']:
@@ -626,8 +633,9 @@ def prepare_gc(common_data, config):
                 logger.info(f"Created weighter-based classifier for {name}")
             else:
                 # Fallback to default threshold
-                classifier = ThresholdBasedClassifier(0.7)
-                logger.warning(f"No weighter or threshold for {name}, using default threshold 0.7")
+                threshold = find_robust_threshold(np.array(embeddings.get_all_scores()))
+                classifier = ThresholdBasedClassifier(threshold)
+                logger.warning(f"No weighter or threshold for {name}, using default auto threshold {threshold}")
             
             classifier_units[name] = (embeddings, classifier)
     

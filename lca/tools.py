@@ -14,6 +14,91 @@ import numpy as np
 
 from weighter import weighter
 
+import numpy as np
+
+def find_robust_threshold(data, bins=500, tail_offset=20, sensitivity=1):
+    """Optimized version with tunable parameters"""
+    hist, bin_edges = np.histogram(data, bins=bins)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    
+    # Minimal smoothing (adjustable)
+    smoothing_strength = max(1, sensitivity)
+    if smoothing_strength == 1:
+        lightly_smoothed = hist
+    else:
+        kernel_size = 2 * smoothing_strength + 1
+        kernel = np.ones(kernel_size) / kernel_size
+        if len(hist) >= kernel_size:
+            lightly_smoothed = np.convolve(hist, kernel, mode='same')
+        else:
+            lightly_smoothed = hist
+    
+    # Adjustable tail start position
+    main_peak_idx = np.argmax(lightly_smoothed)
+    far_tail_start = main_peak_idx + tail_offset
+    
+    if far_tail_start >= len(lightly_smoothed) - 10:
+        return np.percentile(data, 85)
+    
+    far_tail = lightly_smoothed[far_tail_start:]
+    far_centers = bin_centers[far_tail_start:]
+    
+    # Sensitive increase detection
+    for i in range(3, len(far_tail) - 3):
+        if (far_tail[i] > far_tail[i-1] and 
+            far_tail[i] > far_tail[i-2] and
+            far_tail[i+1] > far_tail[i-1] and
+            far_tail[i] > 0):
+            
+            tiny_bump_start = far_centers[i-1]
+            tiny_bump_peak = far_centers[i+2]
+            
+            # 75% toward tiny bump
+            separator = tiny_bump_start + 0.75 * (tiny_bump_peak - tiny_bump_start)
+            return separator
+    
+    return np.percentile(data, 87)
+
+
+    
+def rosin_threshold(data, bins=256):
+    """
+    Implement Rosin (Triangle) threshold manually
+    """
+    # Create histogram
+    hist, bin_edges = np.histogram(data, bins=bins)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    
+    # Find the peak (mode) of the histogram
+    peak_idx = np.argmax(hist)
+    
+    # Find the last non-zero bin
+    last_nonzero = np.where(hist > 0)[0][-1]
+    
+    # Create line from peak to last non-zero bin
+    x1, y1 = peak_idx, hist[peak_idx]
+    x2, y2 = last_nonzero, hist[last_nonzero]
+    
+    # Calculate perpendicular distances from line to histogram
+    max_distance = 0
+    threshold_idx = peak_idx
+    
+    for i in range(peak_idx, last_nonzero + 1):
+        if hist[i] > 0:
+            # Distance from point to line formula
+            # Line: (y2-y1)x - (x2-x1)y + (x2-x1)y1 - (y2-y1)x1 = 0
+            # Distance = |ax + by + c| / sqrt(a² + b²)
+            a = y2 - y1
+            b = -(x2 - x1)
+            c = (x2 - x1) * y1 - (y2 - y1) * x1
+            
+            distance = abs(a * i + b * hist[i] + c) / np.sqrt(a**2 + b**2)
+            
+            if distance > max_distance:
+                max_distance = distance
+                threshold_idx = i
+    
+    return bin_centers[threshold_idx]
 
 def order_edge(u, v):
     return (min(u, v), max(u, v))
