@@ -16,6 +16,15 @@ from weighter import weighter
 
 import numpy as np
 
+def kth_diag_indices(a, k):
+    rows, cols = np.diag_indices_from(a)
+    if k < 0:
+        return rows[-k:], cols[:k]
+    elif k > 0:
+        return rows[:-k], cols[k:]
+    else:
+        return rows, cols
+
 def find_robust_threshold(data, bins=500, tail_offset=20, sensitivity=1):
     """Optimized version with tunable parameters"""
     hist, bin_edges = np.histogram(data, bins=bins)

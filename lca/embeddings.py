@@ -7,6 +7,7 @@ from sklearn.metrics import pairwise_distances, pairwise_distances_chunked
 from sklearn.metrics.pairwise import cosine_similarity
 import sklearn
 import functools
+from tools import kth_diag_indices
 
 class Embeddings(object):
     def __init__(self, embeddings, ids, distance_power=1):
@@ -150,7 +151,10 @@ class Embeddings(object):
             selected_dists = np.full(distmat.shape, False)
             selected_dists[all_inds_y, all_inds_x] = True
 
+            diag_y, diag_x = kth_diag_indices(distmat, start)
+
             filtered = np.logical_or(sorted_dists, selected_dists)
+            filtered[diag_y, diag_x] = False
             inds_y, inds_x = np.nonzero(filtered)
             
             result.extend([
