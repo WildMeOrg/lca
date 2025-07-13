@@ -10,6 +10,8 @@ import logging
 import datetime
 import tempfile
 import shutil
+from pathlib import Path
+
 
 from preprocess import preprocess_data
 from embeddings import Embeddings
@@ -174,6 +176,7 @@ def prepare_common(config):
                 human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
             break
         elif aug_name == 'no_human':
+            logger.info("no_human - running without human reviews")
             human_reviewer = lambda _: ([], True)
             break
     
@@ -420,14 +423,17 @@ def setup_logging(config):
     logging_config = config.get('logging', algorithm_config.get('logging', {}))
     
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    if logging_config.get("update_log_file", True):
-        log_file_name = f"tmp/logs/{exp_name}_{timestamp}.log"
-        logging_config['log_file'] = log_file_name
+    
     
     log_level = logging_config.get('log_level', 'INFO')
     log_file = logging_config.get('log_file')
     
     if log_file is not None:
+        if logging_config.get("update_log_file", True):
+            log_file_name = Path(log_file)
+            log_file_name = log_file_name.with_name(log_file_name.stem + f'_{timestamp}' + log_file_name.suffix)
+            logging_config['log_file'] = log_file_name
+
         logger = logging.getLogger('lca')
         handlers = logger.handlers[:]
         for handler in handlers:
