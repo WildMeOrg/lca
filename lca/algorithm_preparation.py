@@ -26,6 +26,7 @@ from classifier import Classifier
 import ga_driver
 from classifier_system import ClassifierManager, WeighterBasedClassifier, ThresholdBasedClassifier
 from metadata_verifier import MetadataEmbeddings
+from robust_threshold import find_robust_threshold
 
 logger = logging.getLogger('lca')
 
