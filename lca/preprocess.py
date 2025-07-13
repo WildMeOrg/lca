@@ -6,6 +6,8 @@ from sklearn.preprocessing import LabelEncoder
 from tools import *
 
 
+logger = logging.getLogger('lca')
+
 def load_to_df(anno_path,format='standard'):
     data = load_json(anno_path)
 
@@ -37,6 +39,7 @@ def load_to_df(anno_path,format='standard'):
 def filter_viewpoint_df(df, viewpoint_list):
     df = df[df['viewpoint'].isin(viewpoint_list)]
     print('     ', len(df), 'annotations remain after filtering by viewpoint list', viewpoint_list)
+    logger.info(f"     {len(df)} annotations remain after filtering by viewpoint list {viewpoint_list}")
     return df
 
 def filter_uuids_df(df, uuids_list, id_key='uuid'):

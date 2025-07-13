@@ -258,7 +258,7 @@ def prepare_common(config):
 
         scores = primary_verifier_embeddings.get_all_scores()
         print(f"MAX: {np.max(scores)}")
-        plt.hist(scores, bins=35, density=True, alpha=0.6, color='g')
+        plt.hist(scores, bins=500, density=True, alpha=0.6, color='g')
 
         xs = np.linspace(0, 1, 100)
         wgtr = weighters[verifier_name]
@@ -630,6 +630,9 @@ def prepare_gc(common_data, config):
                 threshold = classifier_thresholds[name]
                 if isinstance(threshold, str) and "auto" in threshold:
                     threshold = find_robust_threshold(np.array(embeddings.get_all_scores()))
+                    hist, bin_edges = np.histogram(embeddings.get_all_scores(), bins=500)
+                    with open('vals.json', 'w') as f:
+                        json.dump({"hist":[float(x) for x in hist], "bin_edges":[float(x) for x in bin_edges]}, f)
                 classifier = ThresholdBasedClassifier(threshold)
                 logger.info(f"Created threshold-based classifier for {name} with threshold {threshold}")
             elif name in common_data['weighters']:
