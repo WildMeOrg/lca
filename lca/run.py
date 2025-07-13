@@ -156,9 +156,11 @@ def main(config):
             # Run separately for each viewpoint
             for viewpoint in data_params['viewpoint_list']:
                 print(f"Running for viewpoint: {viewpoint}")
+                logger.info(f"Running for viewpoint: {viewpoint}")
                 save_dir = os.path.join(db_path, viewpoint)
                 os.makedirs(save_dir, exist_ok=True)
                 run_for_viewpoints(config, [viewpoint], save_dir)
+                config['logging']['file_mode'] = 'a'
         else:
             # Run for all viewpoints together
             run(config)
