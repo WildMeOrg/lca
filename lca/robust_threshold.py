@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 def find_robust_threshold(data, bins=500, threshold_fraction=0.15, 
                          failure_threshold=0.3, fallback_percentile=85,
                          em_max_iter=200, em_random_state=42,
-                         debug_plots=True, plot_path="dist.png", 
+                         debug_plots=False, plot_path="dist.png", 
                          print_func=print):
     """
     Robust threshold detection using hybrid EM + residual approach.
