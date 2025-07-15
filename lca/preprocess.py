@@ -8,7 +8,7 @@ from tools import *
 
 logger = logging.getLogger('lca')
 
-def load_to_df(anno_path,format='standard'):
+def load_to_df(anno_path,format='standard', print_func=print):
     data = load_json(anno_path)
 
     dfa = pd.DataFrame(data['annotations'])
@@ -21,7 +21,7 @@ def load_to_df(anno_path,format='standard'):
 
     merge_on_uuid = 'image_uuid' in dfa.columns and 'uuid' in dfi.columns
     if merge_on_uuid:
-        print('Merging on image uuid')
+        print_func('Merging on image uuid')
         df = dfa.merge(dfi, left_on='image_uuid', right_on='uuid', suffixes=('', '_y'))
     else:
         df = dfa.merge(dfi, left_on='image_id', right_on='id', suffixes=('', '_y')) 
@@ -31,32 +31,31 @@ def load_to_df(anno_path,format='standard'):
         df = df.merge(dfc, left_on='category_id', right_on='id', suffixes=('',   '_y'))
 
 
-    print(f'** Loaded {anno_path} **')
-    print('     ', f'Found {len(df)} annotations')
+    print_func(f'** Loaded {anno_path} **')
+    print_func(f'      Found {len(df)} annotations')
 
     return df
 
-def filter_viewpoint_df(df, viewpoint_list):
+def filter_viewpoint_df(df, viewpoint_list, print_func=print):
     df = df[df['viewpoint'].isin(viewpoint_list)]
-    print('     ', len(df), 'annotations remain after filtering by viewpoint list', viewpoint_list)
-    logger.info(f"     {len(df)} annotations remain after filtering by viewpoint list {viewpoint_list}")
+    print_func(f'      {len(df)} annotations remain after filtering by viewpoint list {viewpoint_list}')
     return df
 
-def filter_uuids_df(df, uuids_list, id_key='uuid'):
-    # print(uuids_list)
-    print(df.columns)
+def filter_uuids_df(df, uuids_list, id_key='uuid', print_func=print):
+    # print_func(uuids_list)
+    print_func(df.columns)
     df = df[df[id_key].isin(uuids_list)]
-    print('     ', len(df), 'annotations remain after filtering by given uuids')
+    print_func(f'      {len(df)} annotations remain after filtering by given uuids')
     return df
 
-def filter_min_names_df(df, n_filter_min, filter_key='name_species'):
+def filter_min_names_df(df, n_filter_min, filter_key='name_species', print_func=print):
     df = df.groupby(filter_key).filter(lambda g: len(g)>=n_filter_min)
-    print('     ', len(df), 'annotations remain after filtering by min', n_filter_min, 'per', filter_key)
+    print_func(f'      {len(df)} annotations remain after filtering by min {n_filter_min} per {filter_key}')
     return df
 
-def filter_max_df(df, n_subsample_max, filter_key='name_species'):
+def filter_max_df(df, n_subsample_max, filter_key='name_species', print_func=print):
     df = df.groupby(filter_key, as_index=False).apply(lambda g: g.sample(frac=1, random_state=0).head(n_subsample_max)).droplevel(level=0)
-    print('     ', len(df), 'annotations remain after filtering by max', n_subsample_max, 'per', filter_key)
+    print_func(f'      {len(df)} annotations remain after filtering by max {n_subsample_max} per {filter_key}')
     return df
 
 def convert_name_to_id(names):
@@ -64,33 +63,42 @@ def convert_name_to_id(names):
     names_id = le.fit_transform(names)
     return names_id
 
-def filter_df(df, viewpoint_list, n_filter_min, n_subsample_max, embedding_uuids, filter_key='name', id_key='uuid'):
+def filter_df(df, viewpoint_list, n_filter_min, n_subsample_max, embedding_uuids, filter_key='name', id_key='uuid', print_func=print):
     if embedding_uuids:
-        df = filter_uuids_df(df, embedding_uuids, id_key)
+        df = filter_uuids_df(df, embedding_uuids, id_key, print_func=print_func)
 
     if viewpoint_list:
-        df = filter_viewpoint_df(df, viewpoint_list)
+        df = filter_viewpoint_df(df, viewpoint_list, print_func=print_func)
     
     if n_filter_min:
-        df = filter_min_names_df(df, n_filter_min, filter_key=filter_key)
+        df = filter_min_names_df(df, n_filter_min, filter_key=filter_key, print_func=print_func)
 
     if not len(df):
-        raise Exception("No samples remain after filtering.")
+        raise EmptyDataframeException("No samples remain after filtering.")
         
     if n_subsample_max:
-        df = filter_max_df(df, n_subsample_max, filter_key=filter_key)
+        df = filter_max_df(df, n_subsample_max, filter_key=filter_key, print_func=print_func)
 
     return df
 
-def preprocess_data(anno_path, name_keys=['name'], convert_names_to_ids=True, viewpoint_list=None, n_filter_min=None, n_filter_max=None, images_dir=None, embedding_uuids=None, id_key='uuid', format='standard'):
+def preprocess_data(anno_path, name_keys=['name'], 
+                    convert_names_to_ids=True, 
+                    viewpoint_list=None, 
+                    n_filter_min=None, 
+                    n_filter_max=None, 
+                    images_dir=None, 
+                    embedding_uuids=None, 
+                    id_key='uuid', 
+                    format='standard',
+                    print_func=print):
 
-    df = load_to_df(anno_path, format)
+    df = load_to_df(anno_path, format, print_func=print_func)
 
     filter_key = '__'.join(name_keys)
     df[filter_key] = df[name_keys].apply(lambda row: '_'.join(row.values.astype(str)), axis=1)
     
 
-    df = filter_df(df, viewpoint_list, n_filter_min, n_filter_max, embedding_uuids, filter_key=filter_key, id_key=id_key)
+    df = filter_df(df, viewpoint_list, n_filter_min, n_filter_max, embedding_uuids, filter_key=filter_key, id_key=id_key, print_func=print_func)
 
     if convert_names_to_ids:
         names = df[filter_key].values

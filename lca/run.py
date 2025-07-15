@@ -12,6 +12,7 @@ import os
 
 import tempfile
 import shutil
+from tools import EmptyDataframeException
 
 logger = logging.getLogger('lca')
 
@@ -23,13 +24,10 @@ def get_initial_edges(common_data, config):
     
     # Get algorithm parameters (with backwards compatibility)
     # New: algorithm section, Old: no specific location (use defaults)
-    algorithm_params = config.get('algorithm', {})
-    print(algorithm_params)
-    target_edges = algorithm_params.get('target_edges', 10000)
-    initial_topk = algorithm_params.get('initial_topk', 10)
+    
     
     # Get raw edges
-    raw_edges = list(verifier_embeddings.get_edges(target_edges=target_edges, topk=initial_topk))
+    raw_edges = list(verifier_embeddings.get_edges(target_edges=common_data['target_edges'], topk=common_data['initial_topk']))
     raw_edges = [(*n, verifier_name) for n in raw_edges]
 
     return raw_edges
@@ -61,14 +59,29 @@ def run(config):
     """
     logger.info(f"Starting {config.get('algorithm_type', 'lca').upper()} algorithm")
     
+    output_path = config.get("data", {}).get('output_path', "tmp")
+
     # Create algorithm
-    algorithm, common_data = create_algorithm(config)
+    try:
+        algorithm, common_data = create_algorithm(config)
+    except EmptyDataframeException as e:
+        logger.error(e)
+        logger.info(f"Saving empty results to {output_path}")
+        write_json({}, os.path.join(output_path, 'clustering.json'))
+        write_json({}, os.path.join(output_path, 'node2cid.json'))
+        write_json({}, os.path.join(output_path, 'node2uuid_file.json'))
+        write_json({}, os.path.join(output_path, 'graph.json'))
+        return ({}, {}, {})
     
     # Check if we need to handle temp database cleanup for LCA
     algorithm_type = config.get('algorithm_type', 'lca')
     lca_config = config.get('lca', {})
     temp_db = lca_config.get('temp_db', False) if algorithm_type == 'lca' else False
-    
+    output_path = common_data.get('output_path', 'tmp')
+    # if 'timestamp' in common_data:
+    #     output_path = output_path + '_' + common_data['timestamp']
+    os.makedirs(output_path, exist_ok=True)
+
     try:
         # Get initial edges
         initial_edges = get_initial_edges(common_data, config)
@@ -93,17 +106,13 @@ def run(config):
         result = algorithm.get_clustering()
 
         (clustering_dict, node2cid_dict, G) = result
-        output_path = common_data.get('output_path', 'tmp')
-        # if 'timestamp' in common_data:
-        #     output_path = output_path + '_' + common_data['timestamp']
-        os.makedirs(output_path, exist_ok=True)
+        
         logger.info(f"Saving results to {output_path}")
         write_json(clustering_dict, os.path.join(output_path, 'clustering.json'))
         write_json(node2cid_dict, os.path.join(output_path, 'node2cid.json'))
         write_json(common_data['node2uuid'], os.path.join(output_path, 'node2uuid_file.json'))
         write_json(G, os.path.join(output_path, 'graph.json'))
         return result
-    
     finally:
         # Cleanup temp database if needed
         if temp_db and algorithm_type == 'lca':

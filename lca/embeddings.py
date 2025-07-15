@@ -10,11 +10,12 @@ import functools
 from tools import kth_diag_indices
 
 class Embeddings(object):
-    def __init__(self, embeddings, ids, distance_power=1):
-        self.embeddings = embeddings
+    def __init__(self, embeddings, ids, distance_power=1, print_func=print):
+        self.embeddings = np.array(embeddings)
         self.uuids = ids
         self.ids = list(ids.keys())
         self.distance_power = distance_power
+        self.print_func = print_func
 
     def _reduce_func(self, distmat, start):
         """Common distance matrix reduction function."""
@@ -23,21 +24,22 @@ class Embeddings(object):
         distmat[rng, rng + start] = np.inf
         return distmat
     
-    
-    def _calculate_distance_matrix(self, embeddings=None, ids=None):
+    @functools.cache
+    def _calculate_distance_matrix(self, flags=None):
         """Calculate distance matrix using chunked computation."""
-        if embeddings is None:
+        if flags is None:
             embeddings = self.embeddings
-        if ids is None:
             ids = self.ids
-            
+        else:
+            embeddings = [self.embeddings[i] for (i, f) in enumerate(flags) if f]
+            ids = [self.ids[i] for (i, f) in enumerate(flags) if f]
         chunks = pairwise_distances_chunked(
             embeddings,
             metric='cosine',
             reduce_func=self._reduce_func,
             n_jobs=-1
         )
-        return chunks, ids
+        return list(chunks), ids
 
     def get_score(self, id1, id2):
         embedding1 = self.embeddings[self.ids.index(id1)]
@@ -67,8 +69,8 @@ class Embeddings(object):
 
     def get_stats(self, df, filter_key, id_key='uuid'):
         start_time = time.time()
-        print("Calculating distances...")
-        print(f"{len(self.embeddings)}/{len(self.ids)}")
+        self.print_func("Calculating distances...")
+        self.print_func(f"{len(self.embeddings)}/{len(self.ids)}")
         
         chunks, ids = self._calculate_distance_matrix()
         distmat = np.concatenate(list(chunks), axis=0)
@@ -78,7 +80,6 @@ class Embeddings(object):
         
         return top1, top3, top5, top10
     
-    @functools.cache
     def get_all_scores(self):
         chunks, ids = self._calculate_distance_matrix()
         distmat = np.concatenate(list(chunks), axis=0)
@@ -88,8 +89,8 @@ class Embeddings(object):
 
     def get_top20_matches(self, df, filter_key):
         start_time = time.time()
-        print("Calculating distances...")
-        print(f"{len(self.embeddings)}/{len(self.ids)}")
+        self.print_func("Calculating distances...")
+        self.print_func(f"{len(self.embeddings)}/{len(self.ids)}")
         
         chunks, ids = self._calculate_distance_matrix()
         distmat = np.concatenate(list(chunks), axis=0)
@@ -101,7 +102,7 @@ class Embeddings(object):
             top20_uuids = [ids[idx] for idx in top20_indices]
             top20_results[ids[i]] = [(uuid, 1-score) for uuid, score in zip(top20_uuids, top20_scores)]
         
-        print(f"Finished calculating distances in {time.time() - start_time:.2f} seconds.")
+        self.print_func(f"Finished calculating distances in {time.time() - start_time:.2f} seconds.")
         return top20_results
 
     def get_distance_matrix(self):
@@ -114,19 +115,20 @@ class Embeddings(object):
     
     def get_distmat_chunks(self, uuids_filter=None):
         if uuids_filter is not None:
-            embeddings = [emb for emb, id in zip(self.embeddings, self.ids) if self.uuids[id] in uuids_filter]
-            ids = [id for id in self.ids if self.uuids[id] in uuids_filter]
+            flags = tuple(self.uuids[id] in uuids_filter for id in self.ids)
         else:
-            embeddings = self.embeddings
-            ids = self.ids
+            flags = None
             
-        return self._calculate_distance_matrix(embeddings, ids)
+        return self._calculate_distance_matrix(flags)
 
     def get_edges(self, topk=5, target_edges=10000, target_proportion=None, uuids_filter=None):
-        start_time = time.time()
-        print("Calculating distances...")
         
+        self.print_func("Calculating distances...")
+        start_time = time.time()
         chunks, ids = self.get_distmat_chunks(uuids_filter=uuids_filter)
+        self.print_func(f"Calculate chunks time: {time.time() - start_time:.6f} seconds")
+        start_time = time.time()
+
         result = []
         start = 0
         
@@ -137,7 +139,7 @@ class Embeddings(object):
         else:
             target_edges = int(total_edges * target_proportion)
         
-        print(f"Target: {target_edges}/{total_edges}")
+        self.print_func(f"Target: {target_edges}/{total_edges}")
         
         for distmat in chunks:
             sorted_dists = distmat.argsort(axis=1).argsort(axis=1) < topk
@@ -162,18 +164,18 @@ class Embeddings(object):
                 for (ind1, ind2) in zip(inds_y, inds_x)
             ])
             
-            print(f"Chunk result: {time.time() - start_time:.6f} seconds")
+            self.print_func(f"Chunk result: {time.time() - start_time:.6f} seconds")
             start_time = time.time()
             start += filtered.shape[0]
             
-        print(f"Calculated distances: {time.time() - start_time:.6f} seconds")
-        print(f"{len(set(result))}")
+        self.print_func(f"Calculated distances: {time.time() - start_time:.6f} seconds")
+        self.print_func(f"{len(set(result))}")
         return set(result)
 
     def get_baseline_edges(self, topk=10, distance_threshold=0.5):
         start_time = time.time()
-        print("Calculating distances...")
-        print(f"{len(self.embeddings)}/{len(self.ids)}")
+        self.print_func("Calculating distances...")
+        self.print_func(f"{len(self.embeddings)}/{len(self.ids)}")
         
         chunks, ids = self.get_distmat_chunks()
         result = []
@@ -194,9 +196,9 @@ class Embeddings(object):
                 for (ind1, ind2) in zip(inds_y, inds_x)
             ])
             
-            print(f"Chunk processed in: {time.time() - start_time:.6f} seconds")
+            self.print_func(f"Chunk processed in: {time.time() - start_time:.6f} seconds")
             start_time = time.time()
             start += sorted_dists_mask.shape[0]
         
-        print(f"Calculated distances in: {time.time() - start_time:.6f} seconds")
+        self.print_func(f"Calculated distances in: {time.time() - start_time:.6f} seconds")
         return set(result)

@@ -16,6 +16,9 @@ from weighter import weighter
 
 import numpy as np
 
+class EmptyDataframeException(Exception):
+    pass
+
 def kth_diag_indices(a, k):
     rows, cols = np.diag_indices_from(a)
     if k < 0:
@@ -276,7 +279,7 @@ def print_intersect_stats(df,individual_key="name"):
     
     logger.info(f" ---- number of individuals: {len(names)}" )
     logger.info(f" ---- number of annotations: {len(df)}")
-    avg_ratio = len(df) / len(names)
+    avg_ratio = len(df) / max(1, len(names))
     logger.info(f" ---- average number of annotations per individual: {avg_ratio:.2f}")
 
     annotation_counts = df[individual_key].value_counts()

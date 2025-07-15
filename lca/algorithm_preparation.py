@@ -101,8 +101,9 @@ def prepare_common(config):
     filter_key = '__'.join(name_keys)
     
     # Support different preprocessing formats
-    format_type = data_params.get('format', 'old')  # 'old' or 'drone'
+    format_type = data_params.get('format', 'drone')  # 'old' or 'drone'
     id_key = data_params.get('id_key', 'uuid')
+    
     df = preprocess_data(
         data_params['annotation_file'], 
 
@@ -114,7 +115,8 @@ def prepare_common(config):
         images_dir=data_params['images_dir'], 
         embedding_uuids=uuids,
         id_key=id_key,
-        format=format_type
+        format=format_type,
+        print_func=logger.info
     )
     
     print_intersect_stats(df, individual_key=filter_key)
@@ -133,9 +135,9 @@ def prepare_common(config):
     
     # 3. Create embeddings dictionary
     logger.info("Setting up embeddings...")
-    distance_power = algorithm_config.get('distance_power', 2)
+    distance_power = algorithm_config.get('distance_power', 1)
     embeddings_dict = {
-        'miewid': lazy(lambda: Embeddings(embeddings, node2uuid, distance_power=distance_power)),
+        'miewid': lazy(lambda: Embeddings(embeddings, node2uuid, distance_power=distance_power, print_func=logger.info)),
         'binary': lazy(lambda: BinaryEmbeddings(node2uuid, df, filter_key)),
         'random': lazy(lambda: RandomEmbeddings()),
         'lightglue': lazy(lambda: LightglueEmbeddings(node2uuid, "lightglue_scores_superpoint.pickle")) # TODO: get the correct path
@@ -243,21 +245,29 @@ def prepare_common(config):
     if verifier_name not in aug_names:
         embeddings_dict[verifier_name] = embeddings_dict[verifier_name]()
     
-    # 6. Generate weighter calibration
-    logger.info("Generating weighter calibration...")
-    weighters_calibration = generate_weighter_calibration(
-        embeddings_dict, human_reviewer, edge_weights, verifier_name, aug_names, logger, config
-    )
+    algorithm_type = config.get('algorithm_type', 'gc')
+
+    weighters = {}
+    weighters_calibration = None
     
-    # 7. Create weighters
-    weighters = ga_driver.generate_weighters(algorithm_config, weighters_calibration)
+    edge_weights = config.get('edge_weights', config.get('lca', {}).get('edge_weights', {}))
+    weight_thresholds = edge_weights.get('weight_thresholds', {})  # NEW
+
+    if algorithm_type == 'lca' or weight_thresholds:
+        # 6. Generate weighter calibration
+        logger.info("Generating weighter calibration...")
+        weighters_calibration = generate_weighter_calibration(
+            embeddings_dict, human_reviewer, edge_weights, verifier_name, aug_names, logger, config
+        )
+        
+        # 7. Create weighters
+        weighters = ga_driver.generate_weighters(algorithm_config, weighters_calibration)
 
     if "histogram_path" in config.get("logging", {}):
         histogram_path = config["logging"]["histogram_path"]
         plt.figure()
 
         scores = primary_verifier_embeddings.get_all_scores()
-        print(f"MAX: {np.max(scores)}")
         plt.hist(scores, bins=500, density=True, alpha=0.6, color='g')
 
         xs = np.linspace(0, 1, 100)
@@ -289,6 +299,11 @@ def prepare_common(config):
         os.makedirs(output_path, exist_ok=True)
     else:
         output_path = 'tmp'
+
+    algorithm_params = config.get('algorithm', {})
+    target_edges = algorithm_params.get('target_edges', 0)
+    initial_topk = algorithm_params.get('initial_topk', 10)
+
     # 8. Return common data
     return {
         'embeddings_dict': embeddings_dict,
@@ -303,7 +318,9 @@ def prepare_common(config):
         'df': df,
         'filter_key': filter_key,
         'verifier_name': verifier_name,
-        'output_path': output_path
+        'output_path': output_path,
+        'target_edges': target_edges,
+        'initial_topk': initial_topk
     }
 
 
@@ -325,7 +342,7 @@ def generate_weighter_calibration(embeddings_dict, human_reviewer, edge_weights,
         logger.info(f"Using specified cache file: {cache_file}")
     elif config:
         # Use default cache location in database
-        algorithm_type = config.get('algorithm_type', 'lca')
+        algorithm_type = config.get('algorithm_type', 'gc')
         if 'lca' in config: #  and algorithm_type == 'lca'
             db_path = config['lca'].get('db_path', 'tmp')
             exp_name = config.get('exp_name', 'default')
@@ -599,7 +616,7 @@ def prepare_gc(common_data, config):
     gc_config = config.get('gc', {})
     edge_weights = config.get('edge_weights', config.get('lca', {}).get('edge_weights', {}))
     
-    gc_config['theta'] = gc_config.get('theta', config.get('lca', 0.1).get('theta', 0.1))
+    gc_config['theta'] = gc_config.get('theta', config.get('gc', 0.1).get('theta', 0.1))
     gc_config['prob_human_correct'] = common_data.get('prob_human_correct', 0.98)
 
     # Backwards compatibility: check for both verifier_names and augmentation_names
@@ -629,10 +646,7 @@ def prepare_gc(common_data, config):
                 # Use threshold-based classifier
                 threshold = classifier_thresholds[name]
                 if isinstance(threshold, str) and "auto" in threshold:
-                    threshold = find_robust_threshold(np.array(embeddings.get_all_scores()))
-                    hist, bin_edges = np.histogram(embeddings.get_all_scores(), bins=500)
-                    with open('vals.json', 'w') as f:
-                        json.dump({"hist":[float(x) for x in hist], "bin_edges":[float(x) for x in bin_edges]}, f)
+                    threshold = find_robust_threshold(np.array(embeddings.get_all_scores()), print_func=logger.info)
                 classifier = ThresholdBasedClassifier(threshold)
                 logger.info(f"Created threshold-based classifier for {name} with threshold {threshold}")
             elif name in common_data['weighters']:
@@ -643,7 +657,7 @@ def prepare_gc(common_data, config):
                 logger.info(f"Created weighter-based classifier for {name}")
             else:
                 # Fallback to default threshold
-                threshold = find_robust_threshold(np.array(embeddings.get_all_scores()))
+                threshold = find_robust_threshold(np.array(embeddings.get_all_scores()), print_func=logger.info)
                 classifier = ThresholdBasedClassifier(threshold)
                 logger.warning(f"No weighter or threshold for {name}, using default auto threshold {threshold}")
             
@@ -675,13 +689,15 @@ def create_algorithm(config):
     """
     # Setup logging first
     log_file, timestamp = setup_logging(config)
+    if log_file is not None:
+        print(f"Logging to {os.path.abspath(log_file)}")
     
     # Prepare common data
     common_data = prepare_common(config)
     common_data['timestamp'] = timestamp
     
     # Create algorithm based on config
-    algorithm_type = config.get('algorithm_type', 'lca')  # Default to LCA
+    algorithm_type = config.get('algorithm_type', 'gc')  # Default to GC
     
     if algorithm_type == 'lca':
         algorithm = prepare_lca(common_data, config)
@@ -692,8 +708,6 @@ def create_algorithm(config):
     
     logger.info(f"Created {algorithm_type.upper()} algorithm instance")
 
-    if log_file is not None:
-        print(f"Logging to {os.path.abspath(log_file)}")
 
     return algorithm, common_data
 
