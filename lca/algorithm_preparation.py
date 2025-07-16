@@ -433,7 +433,7 @@ def setup_logging(config):
     """
     Setup logging configuration with backwards compatibility.
     """
-    exp_name = config['exp_name']
+    # exp_name = config.get('exp_name', "")
     algorithm_config = config.get('lca', config.get('gc', {}))
     
     # Backwards compatibility: logging can be top-level or inside algorithm config
