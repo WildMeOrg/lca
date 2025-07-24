@@ -270,18 +270,19 @@ def prepare_common(config):
         scores = primary_verifier_embeddings.get_all_scores()
         plt.hist(scores, bins=500, density=True, alpha=0.6, color='g')
 
-        xs = np.linspace(0, 1, 100)
-        wgtr = weighters[verifier_name]
-        pos_ys = [wgtr.scorer.get_pos_neg(x)[0] for x in xs]
-        neg_ys = [wgtr.scorer.get_pos_neg(x)[1] for x in xs]
+        if verifier_name in weighters:
+            xs = np.linspace(0, 1, 100)
+            wgtr = weighters[verifier_name]
+            pos_ys = [wgtr.scorer.get_pos_neg(x)[0] for x in xs]
+            neg_ys = [wgtr.scorer.get_pos_neg(x)[1] for x in xs]
 
-        plt.plot(xs, pos_ys, color='g')
-        plt.plot(xs, neg_ys, color='r')
+            plt.plot(xs, pos_ys, color='g')
+            plt.plot(xs, neg_ys, color='r')
 
-        # wgtr = weighter.weighter(scorer, config["lca"]["edge_weights"]['prob_human_correct'])
-        wgtr.max_weight = 10
-        
-        plt.plot(xs, [wgtr.wgt_smooth(x) for x in xs], 'k-')
+            # wgtr = weighter.weighter(scorer, config["lca"]["edge_weights"]['prob_human_correct'])
+            wgtr.max_weight = 10
+            
+            plt.plot(xs, [wgtr.wgt_smooth(x) for x in xs], 'k-')
 
         plt.xlabel("Score")
         plt.ylabel("Probability density function")
