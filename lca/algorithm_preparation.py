@@ -641,13 +641,14 @@ def prepare_gc(common_data, config):
             
         if name in common_data['embeddings_dict']:
             embeddings = common_data['embeddings_dict'][name]
-            
+            do_robust_plot = "auto_threshold_plot_path" in config.get("logging", {}) 
+            robust_plot_path = config.get("logging", {}).get("auto_threshold_plot_path", "dist.png")
             # Check if threshold is specified for this classifier
             if name in classifier_thresholds:
                 # Use threshold-based classifier
                 threshold = classifier_thresholds[name]
                 if isinstance(threshold, str) and "auto" in threshold:
-                    threshold = find_robust_threshold(np.array(embeddings.get_all_scores()), print_func=logger.info)
+                    threshold = find_robust_threshold(np.array(embeddings.get_all_scores()), print_func=logger.info, debug_plots=do_robust_plot, plot_path=robust_plot_path)
                 classifier = ThresholdBasedClassifier(threshold)
                 logger.info(f"Created threshold-based classifier for {name} with threshold {threshold}")
             elif name in common_data['weighters']:
@@ -658,7 +659,7 @@ def prepare_gc(common_data, config):
                 logger.info(f"Created weighter-based classifier for {name}")
             else:
                 # Fallback to default threshold
-                threshold = find_robust_threshold(np.array(embeddings.get_all_scores()), print_func=logger.info)
+                threshold = find_robust_threshold(np.array(embeddings.get_all_scores()), print_func=logger.info, debug_plots=do_robust_plot, plot_path=robust_plot_path)
                 classifier = ThresholdBasedClassifier(threshold)
                 logger.warning(f"No weighter or threshold for {name}, using default auto threshold {threshold}")
             
