@@ -10,6 +10,7 @@ import logging
 import datetime
 import tempfile
 import shutil
+import re
 from pathlib import Path
 
 
@@ -648,7 +649,20 @@ def prepare_gc(common_data, config):
                 # Use threshold-based classifier
                 threshold = classifier_thresholds[name]
                 if isinstance(threshold, str) and "auto" in threshold:
-                    threshold = find_robust_threshold(np.array(embeddings.get_all_scores()), print_func=logger.info, debug_plots=do_robust_plot, plot_path=robust_plot_path)
+                    # Parse threshold_fraction from auto string if provided
+                    match = re.match(r'auto\((\d+\.?\d*)\)', threshold)
+                    if match:
+                        threshold_fraction = float(match.group(1))
+                    else:
+                        threshold_fraction = 0.15  # default
+                    
+                    threshold = find_robust_threshold(
+                        np.array(embeddings.get_all_scores()), 
+                        threshold_fraction=threshold_fraction,
+                        print_func=logger.info, 
+                        debug_plots=do_robust_plot, 
+                        plot_path=robust_plot_path
+                    )
                 classifier = ThresholdBasedClassifier(threshold)
                 logger.info(f"Created threshold-based classifier for {name} with threshold {threshold}")
             elif name in common_data['weighters']:
