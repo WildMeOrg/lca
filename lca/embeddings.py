@@ -145,6 +145,10 @@ class Embeddings(object):
             sorted_dists = distmat.argsort(axis=1).argsort(axis=1) < topk
             
             all_inds_y, all_inds_x = np.triu_indices(n=distmat.shape[0], m=distmat.shape[1], k=start+1)
+            
+            valid_dists = np.full(distmat.shape, False)
+            valid_dists[all_inds_y, all_inds_x] = True
+
             chunk_len = len(all_inds_y)
             order = np.random.permutation(chunk_len)[:int(chunk_len * target_proportion)]
             all_inds_y = all_inds_y[order]
@@ -155,7 +159,7 @@ class Embeddings(object):
 
             diag_y, diag_x = kth_diag_indices(distmat, start)
 
-            filtered = np.logical_or(sorted_dists, selected_dists)
+            filtered = np.logical_or(np.logical_and(sorted_dists, valid_dists), selected_dists)
             filtered[diag_y, diag_x] = False
             inds_y, inds_x = np.nonzero(filtered)
             
