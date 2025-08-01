@@ -7,11 +7,18 @@ try:
     from .threshold_utils import (
         fit_robust_gaussian,
         fit_gmm,
-        check_gmm_separability,
         extract_tail_samples,
         calculate_residuals,
         find_residual_zero_crossing,
-        calculate_threshold_percentile
+        calculate_threshold_percentile,
+        find_mixture_mode,
+        find_largest_component_by_mode,
+        check_mode_similarity,
+        fit_mirrored_gamma,
+        calculate_mirrored_gamma_percentile,
+        fit_gamma_from_gaussian_percentile,
+        calculate_residuals_gamma,
+        extract_tail_samples_gamma
     )
     from .threshold_visualization import create_diagnostic_plot
 except ImportError:
@@ -19,19 +26,28 @@ except ImportError:
     from threshold_utils import (
         fit_robust_gaussian,
         fit_gmm,
-        check_gmm_separability,
         extract_tail_samples,
         calculate_residuals,
         find_residual_zero_crossing,
-        calculate_threshold_percentile
+        calculate_threshold_percentile,
+        find_mixture_mode,
+        find_largest_component_by_mode,
+        check_mode_similarity,
+        fit_mirrored_gamma,
+        calculate_mirrored_gamma_percentile,
+        fit_gamma_from_gaussian_percentile,
+        calculate_residuals_gamma,
+        extract_tail_samples_gamma
     )
     from threshold_visualization import create_diagnostic_plot
 
 
 def find_robust_threshold(data, bins=500, threshold_fraction=0.15, 
-                         failure_threshold=2.0, fallback_percentile=85,
+                         fallback_percentile=85,
                          em_max_iter=200, em_random_state=42,
-                         tail_sigma_threshold=3.0, residual_smoothing_sigma=0.01,
+                         tail_sigma_threshold=0, residual_smoothing_sigma=0.01,
+                         mode_tolerance_factor=0.1,
+                         main_percentile=0.999,
                          debug_plots=False, plot_path="dist.png", 
                          print_func=print):
     """
@@ -39,8 +55,9 @@ def find_robust_threshold(data, bins=500, threshold_fraction=0.15,
     
     1. Fit GMM to data
     2. Determine main distribution:
-       - If GMM separable: use bigger GMM component directly
-       - If not separable: robustly fit to all data
+       - Find mode of mixture PDF and component with largest weighted mode
+       - If mixture mode ≈ largest component mode: use that component
+       - Otherwise: robustly fit to all data
     3. Extract tail samples using main distribution
     4. Find zero crossing in residuals
     5. Fit target distribution to samples beyond zero-crossing
@@ -54,8 +71,6 @@ def find_robust_threshold(data, bins=500, threshold_fraction=0.15,
         Number of histogram bins for visualization
     threshold_fraction : float
         Percentile of target distribution for final threshold (0.15 = 15th percentile)
-    failure_threshold : float
-        GMM separability threshold (peaks must be failure_threshold×σ_small apart)
     fallback_percentile : int
         Percentile to use if algorithm fails completely
     em_max_iter : int
@@ -66,6 +81,10 @@ def find_robust_threshold(data, bins=500, threshold_fraction=0.15,
         Number of standard deviations beyond main peak to define tail region
     residual_smoothing_sigma : float
         Gaussian smoothing sigma in data units for residual analysis
+    mode_tolerance_factor : float
+        Tolerance for mode comparison as fraction of standard deviation
+    main_percentile : float
+        Percentile of Gaussian main distribution to use for Gamma fitting (0.9 = 90%)
     debug_plots : bool
         Whether to save diagnostic plots
     plot_path : str
@@ -87,14 +106,14 @@ def find_robust_threshold(data, bins=500, threshold_fraction=0.15,
     
     # Step 2: Determine main distribution based on GMM separability
     main_mean, main_std, fit_info = fit_main_distribution(
-        data, gmm_result, failure_threshold, print_func
+        data, gmm_result, mode_tolerance_factor, print_func
     )
     
     # Steps 3-6: Analyze tail to find target distribution and threshold
     result = analyze_tail(
         data, main_mean, main_std, tail_sigma_threshold, 
         residual_smoothing_sigma, threshold_fraction, 
-        fallback_percentile, print_func
+        fallback_percentile, main_percentile, print_func
     )
     
     # Add fit info to result
@@ -108,9 +127,15 @@ def find_robust_threshold(data, bins=500, threshold_fraction=0.15,
     return threshold
 
 
-def fit_main_distribution(data, gmm_result, failure_threshold, print_func):
+def fit_main_distribution(data, gmm_result, mode_tolerance_factor, print_func):
     """
-    Fit main distribution based on GMM results.
+    Fit main distribution based on GMM results using mode comparison.
+    
+    New algorithm:
+    1. Find mode of mixture PDF
+    2. Find component with largest weighted mode value
+    3. Compare mixture mode with mode of largest component
+    4. If modes are similar, use largest component; otherwise use robust fit
     
     Returns:
         (main_mean, main_std, fit_info) where fit_info contains method details
@@ -126,7 +151,7 @@ def fit_main_distribution(data, gmm_result, failure_threshold, print_func):
             'gmm_success': False
         }
     
-    # GMM succeeded, check separability
+    # GMM succeeded, extract parameters
     means = gmm_result['means']
     stds = gmm_result['stds'] 
     weights = gmm_result['weights']
@@ -134,74 +159,122 @@ def fit_main_distribution(data, gmm_result, failure_threshold, print_func):
     print_func(f"  GMM components: [{means[0]:.3f}±{stds[0]:.3f}, w={weights[0]:.2f}] "
                f"[{means[1]:.3f}±{stds[1]:.3f}, w={weights[1]:.2f}]")
     
-    # Check separability
-    is_separable, sep_info = check_gmm_separability(
-        means[0], stds[0], weights[0],
-        means[1], stds[1], weights[1],
-        failure_threshold
-    )
+    # Find mode of mixture PDF
+    mixture_mode = find_mixture_mode(means, stds, weights)
+    print_func(f"  Mixture PDF mode: {mixture_mode:.3f}")
     
-    print_func(f"  Separability: distance={sep_info['separation_distance']:.3f} "
-               f"{'>==' if is_separable else '<'} {sep_info['required_separation']:.3f} "
-               f"({failure_threshold}×σ_small)")
+    # Find component with largest weighted mode value
+    largest_idx = find_largest_component_by_mode(means, stds, weights)
+    component_mode = means[largest_idx]  # For Gaussian, mode = mean
     
-    if not is_separable:
-        # Not separable, use robust fitting on all data
-        print_func("  GMM not separable, using robust Gaussian fit")
+    # Calculate weighted mode values for reporting
+    weighted_mode_0 = weights[0] * stats.norm.pdf(means[0], loc=means[0], scale=stds[0])
+    weighted_mode_1 = weights[1] * stats.norm.pdf(means[1], loc=means[1], scale=stds[1])
+    
+    print_func(f"  Component weighted modes: [0]={weighted_mode_0:.4f}, [1]={weighted_mode_1:.4f}")
+    print_func(f"  Largest component: {largest_idx+1} (mode={component_mode:.3f})")
+    
+    # Check if modes are similar
+    reference_std = stds[largest_idx]
+    modes_similar = check_mode_similarity(mixture_mode, component_mode, 
+                                         reference_std, mode_tolerance_factor)
+    
+    tolerance = mode_tolerance_factor * reference_std
+    print_func(f"  Mode comparison: |{mixture_mode:.3f} - {component_mode:.3f}| = "
+               f"{abs(mixture_mode - component_mode):.3f} {'<' if modes_similar else '>='} "
+               f"{tolerance:.3f} ({mode_tolerance_factor}×σ)")
+    
+    if modes_similar:
+        # Modes are similar, use largest component
+        print_func("  Modes are similar, using largest component as main distribution")
+        main_mean = means[largest_idx]
+        main_std = stds[largest_idx]
+        
+        return main_mean, main_std, {
+            'method': 'gmm_component',
+            'gmm_success': True,
+            'gmm': gmm_result,
+            'mixture_mode': mixture_mode,
+            'component_used': largest_idx,
+            'modes_similar': True,
+            'mode_distance': abs(mixture_mode - component_mode),
+            'mode_tolerance': tolerance,
+            'weighted_modes': [weighted_mode_0, weighted_mode_1],
+            'means': means,
+            'stds': stds,
+            'weights': weights
+        }
+    else:
+        # Modes are not similar, use robust fitting
+        print_func("  Modes are not similar, using robust Gaussian fit")
         main_mean, main_std = fit_robust_gaussian(data)
         print_func(f"  Main distribution: mean={main_mean:.3f}, std={main_std:.3f}")
         
         return main_mean, main_std, {
             'method': 'robust',
             'gmm_success': True,
-            'gmm_separable': False,
             'gmm': gmm_result,
-            'separability_info': sep_info
+            'mixture_mode': mixture_mode,
+            'largest_component': largest_idx,
+            'modes_similar': False,
+            'mode_distance': abs(mixture_mode - component_mode),
+            'mode_tolerance': tolerance,
+            'weighted_modes': [weighted_mode_0, weighted_mode_1],
+            'means': means,
+            'stds': stds,
+            'weights': weights
         }
-    
-    # GMM is separable, use bigger component directly
-    print_func("  GMM separable, using bigger component as main distribution")
-    
-    # Identify bigger component by weight
-    bigger_idx = 0 if weights[0] > weights[1] else 1
-    main_mean = means[bigger_idx]
-    main_std = stds[bigger_idx]
-    
-    print_func(f"  Main distribution (GMM component {bigger_idx+1}): "
-               f"mean={main_mean:.3f}, std={main_std:.3f}")
-    
-    return main_mean, main_std, {
-        'method': 'gmm_component',
-        'gmm_success': True,
-        'gmm_separable': True,
-        'gmm': gmm_result,
-        'separability_info': sep_info,
-        'component_used': bigger_idx,
-        'means': means,
-        'stds': stds,
-        'weights': weights
-    }
 
 
 def analyze_tail(data, main_mean, main_std, tail_sigma_threshold,
                 residual_smoothing_sigma, threshold_fraction, 
-                fallback_percentile, print_func):
+                fallback_percentile, main_percentile, print_func):
     """
     Analyze tail of distribution to find target component and threshold.
     
     Steps:
-    3. Extract tail samples using main distribution parameters
-    4. Find zero crossing in residuals
-    5. Fit target distribution to samples beyond zero-crossing
-    6. Calculate threshold using percentile of target distribution
+    3. Fit Gamma distribution to main distribution data
+    4. Extract tail samples using Gamma distribution parameters
+    5. Find zero crossing in residuals using Gamma
+    6. Fit target distribution to samples beyond zero-crossing
+    7. Calculate threshold using percentile of target distribution
     
     Returns:
         dict with threshold and analysis details
     """
-    # Step 3: Extract tail samples
-    tail_samples, tail_threshold = extract_tail_samples(
-        data, main_mean, main_std, tail_sigma_threshold
-    )
+    # NEW STEP: Fit Gamma to main distribution
+    try:
+        gamma_shape, gamma_loc, gamma_scale, gamma_threshold, n_gamma_samples = \
+            fit_gamma_from_gaussian_percentile(data, main_mean, main_std, main_percentile)
+        
+        print_func(f"  Gamma fit to {main_percentile*100:.0f}% of main: "
+                   f"shape={gamma_shape:.3f}, loc={gamma_loc:.3f}, scale={gamma_scale:.3f}")
+        print_func(f"    Using {n_gamma_samples} samples below {gamma_threshold:.3f}")
+        
+        # Calculate equivalent mean and std
+        gamma_mean = gamma_loc + gamma_shape * gamma_scale
+        gamma_std = np.sqrt(gamma_shape) * gamma_scale
+        print_func(f"    Gamma equivalent: mean={gamma_mean:.3f}, std={gamma_std:.3f}")
+        
+        gamma_fit_success = True
+    except Exception as e:
+        print_func(f"  WARNING: Gamma fitting failed: {e}")
+        print_func("  Falling back to Gaussian for tail analysis")
+        gamma_fit_success = False
+        # Use Gaussian parameters as fallback
+        gamma_shape = gamma_loc = gamma_scale = None
+        gamma_mean = main_mean
+        gamma_std = main_std
+    
+    # Step 3: Extract tail samples using appropriate distribution
+    if gamma_fit_success:
+        tail_samples, tail_threshold = extract_tail_samples_gamma(
+            data, gamma_shape, gamma_loc, gamma_scale, tail_sigma_threshold
+        )
+    else:
+        tail_samples, tail_threshold = extract_tail_samples(
+            data, main_mean, main_std, tail_sigma_threshold
+        )
     print_func(f"  Tail samples beyond {tail_threshold:.3f} ({tail_sigma_threshold}σ): "
                f"{len(tail_samples)} ({len(tail_samples)/len(data):.1%})")
     
@@ -211,14 +284,21 @@ def analyze_tail(data, main_mean, main_std, tail_sigma_threshold,
             'threshold': np.percentile(data, fallback_percentile),
             'main_mean': main_mean,
             'main_std': main_std,
-            'tail_analysis_success': False
+            'tail_analysis_success': False,
+            'gamma_fit_success': False
         }
     
     # Step 4: Calculate residuals and find zero crossing
     bins = min(50, len(tail_samples)//5)
-    bin_centers, residuals, expected_hist, observed_hist = calculate_residuals(
-        tail_samples, main_mean, main_std, tail_threshold, bins
-    )
+    
+    if gamma_fit_success:
+        bin_centers, residuals, expected_hist, observed_hist = calculate_residuals_gamma(
+            tail_samples, gamma_shape, gamma_loc, gamma_scale, tail_threshold, bins
+        )
+    else:
+        bin_centers, residuals, expected_hist, observed_hist = calculate_residuals(
+            tail_samples, main_mean, main_std, tail_threshold, bins
+        )
     
     print_func(f"    Expected hist: total={np.sum(expected_hist):.1f}, "
                f"max={np.max(expected_hist):.3f}")
@@ -247,21 +327,38 @@ def analyze_tail(data, main_mean, main_std, tail_sigma_threshold,
             target_samples = tail_samples
             cutoff_value = tail_threshold
     
-    # Step 5: Fit target distribution
-    target_mean, target_std = stats.norm.fit(target_samples)
-    print_func(f"    Target distribution: mean={target_mean:.3f}, std={target_std:.3f}")
+    # Step 5: Fit target distribution (mirrored Gamma)
+    shape, loc, scale, mirror_point = fit_mirrored_gamma(target_samples)
+    
+    # Calculate mean and std for compatibility
+    gamma_mean = loc + shape * scale  # Gamma mean in mirrored space
+    gamma_var = shape * scale**2      # Gamma variance
+    target_mean = mirror_point - gamma_mean  # Mean in original space
+    target_std = np.sqrt(gamma_var)  # Std is same
+    
+    print_func(f"    Target distribution (mirrored Gamma): shape={shape:.3f}, loc={loc:.3f}, "
+               f"scale={scale:.3f}, mirror={mirror_point:.3f}")
+    print_func(f"    Equivalent mean={target_mean:.3f}, std={target_std:.3f}")
     print_func(f"    Using {len(target_samples)} samples beyond cutoff={cutoff_value:.3f}")
     
     # Step 6: Calculate threshold
-    threshold = calculate_threshold_percentile(target_mean, target_std, threshold_fraction)
+    threshold = calculate_mirrored_gamma_percentile(shape, loc, scale, mirror_point, threshold_fraction)
     
-    return {
+    result_dict = {
         'threshold': threshold,
         'main_mean': main_mean,
         'main_std': main_std,
+        'tail_sigma_threshold': tail_sigma_threshold,
         'tail_threshold': tail_threshold,
         'tail_samples': len(tail_samples),
-        'target_distribution': {'mean': target_mean, 'std': target_std},
+        'target_distribution': {
+            'mean': target_mean, 
+            'std': target_std,
+            'shape': shape,
+            'loc': loc,
+            'scale': scale,
+            'mirror_point': mirror_point
+        },
         'second_component': {'mean': target_mean, 'std': target_std},  # For compatibility
         'bin_centers': bin_centers,
         'residuals': residuals,
@@ -271,3 +368,21 @@ def analyze_tail(data, main_mean, main_std, tail_sigma_threshold,
         'tail_analysis_success': True,
         'zero_crossing_found': cutoff_value != tail_threshold
     }
+    
+    # Add Gamma fit information if successful
+    if gamma_fit_success:
+        result_dict['main_distribution_gamma'] = {
+            'shape': gamma_shape,
+            'loc': gamma_loc,
+            'scale': gamma_scale,
+            'percentile_used': main_percentile,
+            'threshold': gamma_threshold,
+            'n_samples': n_gamma_samples,
+            'mean': gamma_mean,
+            'std': gamma_std
+        }
+        result_dict['gamma_fit_success'] = True
+    else:
+        result_dict['gamma_fit_success'] = False
+    
+    return result_dict

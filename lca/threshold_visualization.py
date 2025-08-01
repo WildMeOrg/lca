@@ -5,6 +5,11 @@ import matplotlib.pyplot as plt
 from scipy import stats
 from scipy.ndimage import gaussian_filter1d
 
+try:
+    from .threshold_utils import evaluate_mirrored_gamma_pdf
+except ImportError:
+    from threshold_utils import evaluate_mirrored_gamma_pdf
+
 
 def create_diagnostic_plot(data: np.ndarray, result: dict, bins: int = 500, 
                           plot_path: str = "diagnostic.png") -> None:
@@ -107,6 +112,24 @@ def plot_main_distribution(ax, data: np.ndarray, result: dict, bins: int):
     
     ax.plot(x_plot, main_pdf, 'r-', linewidth=2.5, label=label)
     
+    # Plot Gamma distribution if available
+    if 'main_distribution_gamma' in result and result.get('gamma_fit_success', False):
+        gamma_info = result['main_distribution_gamma']
+        gamma_shape = gamma_info['shape']
+        gamma_loc = gamma_info['loc']
+        gamma_scale = gamma_info['scale']
+        
+        # Plot Gamma PDF
+        gamma_pdf = stats.gamma.pdf(x_plot, gamma_shape, loc=gamma_loc, scale=gamma_scale)
+        ax.plot(x_plot, gamma_pdf, 'g--', linewidth=2.5, 
+                label=f'Main (Gamma): α={gamma_shape:.2f}, β={gamma_scale:.2f}')
+        
+        # Show Gamma percentile cutoff
+        gamma_threshold = gamma_info['threshold']
+        percentile_used = gamma_info['percentile_used']
+        ax.axvline(gamma_threshold, color='darkgreen', linestyle='-.', linewidth=2,
+                  label=f'Gamma {percentile_used*100:.0f}% cutoff: {gamma_threshold:.2f}')
+    
     # Show refinement cutoff if GMM was used (for backward compatibility)
     if method == 'gmm_refined' and 'refinement_percentile' in result:
         percentile = result['refinement_percentile']
@@ -125,8 +148,9 @@ def plot_main_distribution(ax, data: np.ndarray, result: dict, bins: int):
     # Show tail cutoff
     if 'tail_threshold' in result:
         tail_threshold = result['tail_threshold']
+        tail_sigma_threshold = result['tail_sigma_threshold']
         ax.axvline(tail_threshold, color='orange', linestyle=':', linewidth=2,
-                  label=f'Tail cutoff (3σ): {tail_threshold:.2f}')
+                  label=f'Tail cutoff ({tail_sigma_threshold:.2f}σ): {tail_threshold:.2f}')
     
     ax.set_xlabel('Value')
     ax.set_ylabel('Density')
@@ -193,9 +217,19 @@ def plot_tail_analysis(ax, data: np.ndarray, result: dict):
             bin_width = hist_bins[1] - hist_bins[0]
             scale = samples_used * bin_width
             
-            target_pdf = stats.norm.pdf(x_range, target['mean'], target['std']) * scale
-            ax.plot(x_range, target_pdf, 'g-', linewidth=2.5, 
-                   label=f"Target: μ={target['mean']:.2f}, σ={target['std']:.2f}")
+            # Check if mirrored Gamma parameters are available
+            if 'shape' in target:
+                # Use mirrored Gamma
+                target_pdf = evaluate_mirrored_gamma_pdf(x_range, target['shape'], 
+                                                        target['loc'], target['scale'], 
+                                                        target['mirror_point']) * scale
+                ax.plot(x_range, target_pdf, 'g-', linewidth=2.5, 
+                       label=f"Target (Gamma): α={target['shape']:.2f}, β={target['scale']:.2f}")
+            else:
+                # Fallback to normal distribution
+                target_pdf = stats.norm.pdf(x_range, target['mean'], target['std']) * scale
+                ax.plot(x_range, target_pdf, 'g-', linewidth=2.5, 
+                       label=f"Target: μ={target['mean']:.2f}, σ={target['std']:.2f}")
             
             # Mark target peak
             ax.axvline(target['mean'], color='green', linestyle=':', linewidth=2,
@@ -245,10 +279,35 @@ def plot_overall_summary(ax, data: np.ndarray, result: dict, bins: int):
     
     ax.plot(x_plot, main_pdf, 'r-', linewidth=2, label=label)
     
+    # Plot main Gamma distribution if available
+    if 'main_distribution_gamma' in result and result.get('gamma_fit_success', False):
+        gamma_info = result['main_distribution_gamma']
+        gamma_shape = gamma_info['shape']
+        gamma_loc = gamma_info['loc']
+        gamma_scale = gamma_info['scale']
+        
+        # Plot Gamma PDF
+        gamma_pdf = stats.gamma.pdf(x_plot, gamma_shape, loc=gamma_loc, scale=gamma_scale)
+        
+        # Scale by weight if using GMM component
+        if result.get('method') == 'gmm_component' and 'weights' in result:
+            gamma_pdf = gamma_pdf * main_weight
+            
+        ax.plot(x_plot, gamma_pdf, 'r--', linewidth=2, alpha=0.7,
+                label='Main Gamma distribution')
+    
     # Plot target distribution (scaled by approximate weight)
     if 'target_distribution' in result and result.get('tail_analysis_success', False):
         target = result['target_distribution']
-        target_pdf = stats.norm.pdf(x_plot, target['mean'], target['std'])
+        # Check if mirrored Gamma parameters are available
+        if 'shape' in target:
+            # Use mirrored Gamma
+            target_pdf = evaluate_mirrored_gamma_pdf(x_plot, target['shape'], 
+                                                    target['loc'], target['scale'], 
+                                                    target['mirror_point'])
+        else:
+            # Fallback to normal distribution
+            target_pdf = stats.norm.pdf(x_plot, target['mean'], target['std'])
         
         # Estimate weight from tail samples
         tail_weight = result.get('tail_samples', 0) / len(data)
@@ -274,9 +333,18 @@ def plot_overall_summary(ax, data: np.ndarray, result: dict, bins: int):
     summary_text = f"Method: {method_text}\n"
     summary_text += f"Main: μ={main_mean:.3f}, σ={main_std:.3f}\n"
     
+    # Add main Gamma info if available
+    if 'main_distribution_gamma' in result and result.get('gamma_fit_success', False):
+        gamma_info = result['main_distribution_gamma']
+        summary_text += f"Main (Gamma): α={gamma_info['shape']:.3f}, β={gamma_info['scale']:.3f}\n"
+    
     if 'target_distribution' in result:
         target = result['target_distribution']
-        summary_text += f"Target: μ={target['mean']:.3f}, σ={target['std']:.3f}\n"
+        if 'shape' in target:
+            summary_text += f"Target (Gamma): α={target['shape']:.3f}, β={target['scale']:.3f}\n"
+            summary_text += f"        μ={target['mean']:.3f}, σ={target['std']:.3f}\n"
+        else:
+            summary_text += f"Target: μ={target['mean']:.3f}, σ={target['std']:.3f}\n"
     
     summary_text += f"Threshold: {result['threshold']:.3f}"
     
