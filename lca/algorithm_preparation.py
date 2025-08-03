@@ -3,6 +3,7 @@ Unified algorithm preparation module.
 Handles all common setup logic for both LCA and Graph Consistency algorithms.
 """
 
+import types
 import numpy as np
 import random
 import os
@@ -29,6 +30,7 @@ from classifier import Classifier
 import ga_driver
 from classifier_system import ClassifierManager, WeighterBasedClassifier, ThresholdBasedClassifier
 from metadata_verifier import MetadataEmbeddings
+from tracking_id_verifier import TrackingIdEmbeddings
 from robust_threshold import find_robust_threshold
 
 logger = logging.getLogger('lca')
@@ -46,29 +48,33 @@ def parse_verifier_names(verifier_names):
     """
     parsed_verifiers = []
     
+    meta_names = ['metadata', 'tracking']
+
     i = 0
     while i < len(verifier_names):
         current = verifier_names[i]
-        
-        if current.startswith('metadata(') and current.endswith(')'):
-            # Explicit: metadata(miewid)
-            # Remove "metadata(" prefix and ")" suffix
-            base_name = current.removeprefix('metadata(').removesuffix(')')
-            if not base_name:
-                raise ValueError("Empty base verifier in metadata() syntax")
-            parsed_verifiers.append(('metadata', base_name))
-            
-        elif current == 'metadata':
-            # Implicit: metadata uses next verifier as base
-            if i + 1 >= len(verifier_names):
-                raise ValueError("metadata verifier needs a base verifier")
-            base_name = verifier_names[i + 1]
-            parsed_verifiers.append(('metadata', base_name))
-            
-        else:
-            # Regular verifier
+        meta = False
+        for meta_name in meta_names:
+            if current.startswith(meta_name + '(') and current.endswith(')'):
+                # Explicit: metadata(miewid)
+                # Remove "metadata(" prefix and ")" suffix
+                base_name = current.removeprefix(meta_name + '(').removesuffix(')')
+                if not base_name:
+                    raise ValueError(f"Empty base verifier in {meta_name}() syntax")
+                parsed_verifiers.append((meta_name, base_name))
+                meta = True
+                break
+            elif current == meta_name:
+                # Implicit: metadata uses next verifier as base
+                if i + 1 >= len(verifier_names):
+                    raise ValueError(f"{meta_name} verifier needs a base verifier")
+                base_name = verifier_names[i + 1]
+                parsed_verifiers.append((meta_name, base_name))
+                i += 1
+                meta = True
+                break
+        if not meta:
             parsed_verifiers.append((current, None))
-        
         i += 1
     
     return parsed_verifiers
@@ -215,12 +221,19 @@ def prepare_common(config):
             lambda: scorer.density_neg.sample().item()
         )
         embeddings_dict['synthetic'] = lazy(lambda : synthetic_embeddings)
+    
     for name, base_name in parsed_verifiers:
         if name == 'metadata':
             # Create metadata wrapper
             base_embeddings = embeddings_dict[base_name]()
             embeddings_dict[f'metadata({base_name})'] = lazy(lambda: MetadataEmbeddings(
                 base_embeddings, df, node2uuid)
+            )
+        elif name == 'tracking':
+            # Create tracking ID wrapper
+            base_embeddings = embeddings_dict[base_name]()
+            embeddings_dict[f'tracking({base_name})'] = lazy(lambda: TrackingIdEmbeddings.from_embeddings(
+                base_embeddings, df, node2uuid, id_key, tracking_key='tracking_id', multiplier=1)
             )
 
     logger.info("Computing and logging verifier performance statistics...")
@@ -636,46 +649,55 @@ def prepare_gc(common_data, config):
     gc_config["tries_before_edge_done"] = tries_before_edge_done
     # Create classifier units from existing common data
     classifier_units = {}
+
+    
+    do_robust_plot = "auto_threshold_plot_path" in config.get("logging", {}) 
+    robust_plot_path = config.get("logging", {}).get("auto_threshold_plot_path", "dist.png")
+
+    # Check if threshold is specified for this classifier
+    for name in classifier_thresholds:
+        embeddings = common_data['embeddings_dict'][name]
+        
+        # Use threshold-based classifier
+        threshold = classifier_thresholds[name]
+        if isinstance(threshold, str):
+            if "auto" in threshold:
+                # Parse threshold_fraction from auto string if provided
+                match = re.match(r'auto\((\d+\.?\d*)\)', threshold)
+                if match:
+                    threshold_fraction = float(match.group(1))
+                else:
+                    threshold_fraction = 0.15  # default
+                if isinstance(embeddings, types.FunctionType):
+                    embeddings = embeddings()
+                    common_data['embeddings_dict'][name] = embeddings
+                threshold = find_robust_threshold(
+                    np.array(embeddings.get_all_scores()), 
+                    threshold_fraction=threshold_fraction,
+                    print_func=logger.info, 
+                    debug_plots=do_robust_plot, 
+                    plot_path=robust_plot_path
+                )
+            elif threshold in classifier_units:
+                # Use existing threshold value
+                classifier = classifier_units[threshold]
+                logger.info(f"Using existing threshold-based classifier for {name} with threshold from {threshold}")
+                classifier_units[name] = classifier
+                continue
+        
+        classifier = ThresholdBasedClassifier(threshold)
+        logger.info(f"Created threshold-based classifier for {name} with threshold {threshold}")
+        classifier_units[name] = (embeddings, classifier)
+
     for name in verifier_names:
-        if name == 'human':
+        if 'human' in name:
             continue  # Handled by human_reviewer
-            
-        if name in common_data['embeddings_dict']:
-            embeddings = common_data['embeddings_dict'][name]
-            do_robust_plot = "auto_threshold_plot_path" in config.get("logging", {}) 
-            robust_plot_path = config.get("logging", {}).get("auto_threshold_plot_path", "dist.png")
-            # Check if threshold is specified for this classifier
-            if name in classifier_thresholds:
-                # Use threshold-based classifier
-                threshold = classifier_thresholds[name]
-                if isinstance(threshold, str) and "auto" in threshold:
-                    # Parse threshold_fraction from auto string if provided
-                    match = re.match(r'auto\((\d+\.?\d*)\)', threshold)
-                    if match:
-                        threshold_fraction = float(match.group(1))
-                    else:
-                        threshold_fraction = 0.15  # default
-                    
-                    threshold = find_robust_threshold(
-                        np.array(embeddings.get_all_scores()), 
-                        threshold_fraction=threshold_fraction,
-                        print_func=logger.info, 
-                        debug_plots=do_robust_plot, 
-                        plot_path=robust_plot_path
-                    )
-                classifier = ThresholdBasedClassifier(threshold)
-                logger.info(f"Created threshold-based classifier for {name} with threshold {threshold}")
-            elif name in common_data['weighters']:
-                # Use weighter-based classifier
-                weighter = common_data['weighters'][name]
-                weight_threshold = weight_thresholds.get(name, 0)  # NEW: Default to 0
-                classifier = WeighterBasedClassifier(weighter, weight_threshold)  # NEW: Pass threshold
-                logger.info(f"Created weighter-based classifier for {name}")
-            else:
-                # Fallback to default threshold
-                threshold = find_robust_threshold(np.array(embeddings.get_all_scores()), print_func=logger.info, debug_plots=do_robust_plot, plot_path=robust_plot_path)
-                classifier = ThresholdBasedClassifier(threshold)
-                logger.warning(f"No weighter or threshold for {name}, using default auto threshold {threshold}")
+        if name not in classifier_units:
+            embeddings = common_data['embeddings_dict'].get(name)
+            # Fallback to default threshold
+            threshold = find_robust_threshold(np.array(embeddings.get_all_scores()), print_func=logger.info, debug_plots=do_robust_plot, plot_path=robust_plot_path)
+            classifier = ThresholdBasedClassifier(threshold)
+            logger.warning(f"No weighter or threshold for {name}, using default auto threshold {threshold}")
             
             classifier_units[name] = (embeddings, classifier)
     
