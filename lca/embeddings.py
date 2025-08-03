@@ -146,8 +146,8 @@ class Embeddings(object):
             
             all_inds_y, all_inds_x = np.triu_indices(n=distmat.shape[0], m=distmat.shape[1], k=start+1)
             
-            valid_dists = np.full(distmat.shape, False)
-            valid_dists[all_inds_y, all_inds_x] = True
+            valid_dists = np.full(distmat.shape, True)
+            # valid_dists[all_inds_y, all_inds_x] = True
 
             chunk_len = len(all_inds_y)
             order = np.random.permutation(chunk_len)[:int(chunk_len * target_proportion)]
