@@ -99,7 +99,8 @@ def find_robust_threshold(data, bins=500, threshold_fraction=0.15,
     """
     data = np.array(data).flatten()
     print_func(f"Analyzing {len(data)} data points")
-    
+    if data.size == 0:
+        return 0.5
     # Step 1: Fit GMM
     gmm_result = fit_gmm(data, n_components=2, max_iter=em_max_iter, 
                          random_state=em_random_state)

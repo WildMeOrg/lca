@@ -633,6 +633,7 @@ def prepare_gc(common_data, config):
     
     gc_config['theta'] = gc_config.get('theta', config.get('gc', 0.1).get('theta', 0.1))
     gc_config['prob_human_correct'] = common_data.get('prob_human_correct', 0.98)
+    gc_config['max_densify_edges'] = gc_config.get('max_densify_edges', 200)
 
     # Backwards compatibility: check for both verifier_names and augmentation_names
     verifier_names_str = edge_weights.get('verifier_names', edge_weights.get('augmentation_names', 'miewid human'))
@@ -656,7 +657,11 @@ def prepare_gc(common_data, config):
 
     # Check if threshold is specified for this classifier
     for name in classifier_thresholds:
+        if name not in common_data['embeddings_dict']:
+            continue  # Skip if no embeddings for this classifier
         embeddings = common_data['embeddings_dict'][name]
+        if isinstance(embeddings, types.FunctionType):
+            embeddings = embeddings()
         
         # Use threshold-based classifier
         threshold = classifier_thresholds[name]
@@ -669,7 +674,6 @@ def prepare_gc(common_data, config):
                 else:
                     threshold_fraction = 0.15  # default
                 if isinstance(embeddings, types.FunctionType):
-                    embeddings = embeddings()
                     common_data['embeddings_dict'][name] = embeddings
                 threshold = find_robust_threshold(
                     np.array(embeddings.get_all_scores()), 

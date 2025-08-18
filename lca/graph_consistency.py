@@ -1,4 +1,5 @@
 
+import random
 import networkx as nx
 import numpy as np
 import logging
@@ -108,7 +109,8 @@ class GraphConsistencyAlgorithm(object):
     def densify_iPCCs(self, iPCCs):
         """Add missing edges using classifier system."""
         updated_iPCCs = []
-
+        max_edges = self.config["max_densify_edges"]
+        logger = logging.getLogger('lca')
         for subG in iPCCs:
             missing_edges = []
             nodes = list(subG.nodes())
@@ -118,7 +120,12 @@ class GraphConsistencyAlgorithm(object):
                     n0, n1 = nodes[i], nodes[j]
                     if not self.G.has_edge(n0, n1):
                         missing_edges.append((n0, n1))
-
+            if len(subG.edges()) + len(missing_edges) > max_edges:
+                # Sample edges instead of full densification
+                sample_size = max(0, max_edges - len(subG.edges()))
+                logger.info(f"Sampling {sample_size}/{len(missing_edges)} edges for densification of CC with {len(subG.edges())} edges")
+                missing_edges = random.sample(missing_edges, sample_size)
+                
             # Classify missing edges using next available classifier for each
             new_edges = []
             for n0, n1 in missing_edges:
@@ -338,17 +345,18 @@ class GraphConsistencyAlgorithm(object):
         # logger.info(f"Total positive edges: {np.sum(d.get('label') == 'negative' for _, _, d in self.G.edges(data=True))}")
         # logger.info(f"Total negative edges: {np.sum(d.get('label') == 'positive' for _, _, d in self.G.edges(data=True))}")
         # Check each component for inconsistencies
+        maxsize = 0
         for component in components:
             # logger.info(f"Nodes in component: {len(component)}")
             subG = self.G.subgraph(component)  # Get all edges within the component
-            
+            maxsize = max(maxsize, len(subG.nodes()))
             # if len(component) > self.config["densify_threshold"]:
             #     u, v, _ = min([(u,v, d["confidence"]) for u, v, d in subG.edges(data=True) if d["label"]=="positive"], key=lambda edge: edge[2])
             #     self.G[u][v]["label"] = "negative"
             # Check for negative edges
             if any(d.get("label") == "negative" and d.get("is_active") for _, _, d in subG.edges(data=True)):
                 result.append(subG)
-        
+        logger.info(f"Largest component {maxsize}") 
         logger.info(f"Found inconsistent components {len(result)}")   
         return result
 
