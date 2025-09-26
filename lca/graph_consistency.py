@@ -30,13 +30,13 @@ class GraphConsistencyAlgorithm(object):
     def filter_for_review(self, edges_for_human):
         logger = logging.getLogger('lca')
         final_for_review = []
-        for n0, n1 in edges_for_human:
+        for n0, n1, s in edges_for_human:
             edge_key = order_edge(n0, n1)
             attempts = self.human_attempts.get(edge_key, 0)
             
             if attempts < self.tries_before_edge_done:
                 self.human_attempts[edge_key] = attempts + 1
-                final_for_review.append((n0, n1))
+                final_for_review.append((n0, n1, s))
             else:
                 logger.warning(f"Edge ({n0}, {n1}) exceeded max human attempts ({self.tries_before_edge_done})")
         return final_for_review

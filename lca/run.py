@@ -12,7 +12,8 @@ import os
 
 import tempfile
 import shutil
-from tools import EmptyDataframeException
+import itertools
+from tools import EmptyDataframeException, load_dataframe_lightweight, discover_field_values_from_df
 
 logger = logging.getLogger('lca')
 
@@ -85,9 +86,12 @@ def run(config):
     try:
         # Get initial edges
         initial_edges = get_initial_edges(common_data, config)
+        # print("initial", initial_edges[0])
         logger.info(f"Starting with {len(initial_edges)} initial edges")
         # Start algorithm
         requested_edges = algorithm.step(initial_edges)
+
+        # print("requested", requested_edges[0])
         
         # Main loop - algorithm handles all its own logic
         while requested_edges and not algorithm.is_finished():
@@ -126,14 +130,19 @@ def run(config):
                     logger.info(f"Cleaning up temp database: {temp_db_path}")
                     shutil.rmtree(temp_db_path, ignore_errors=True)
 
-def run_for_viewpoints(config, viewpoint_list, save_dir):
-    """Run algorithm for specific viewpoints."""
-    # Simple config modification
+def run_for_field_values(config, field_overrides, save_dir):
+    """Run algorithm for specific field values."""
     config_copy = config.copy()
     config_copy['data'] = config_copy['data'].copy()
-    config_copy['data']['viewpoint_list'] = viewpoint_list
-    config_copy['data']['output_path'] = save_dir
     
+    # Apply field overrides to config
+    for field, value in field_overrides.items():
+        list_key = f"{field}_list"
+        config_copy['data'][list_key] = [value] if not isinstance(value, list) else value
+    
+    config_copy['data']['output_path'] = save_dir
+    if 'histogram_path' in config_copy.get('logging', {}):
+        config_copy['logging']['histogram_path'] = config_copy['logging']['histogram_path'] + f"_{str(field_overrides)}.png"
     # Override save directory for LCA if needed (backwards compatible)
     algorithm_type = config_copy.get('algorithm_type', 'lca')
     if algorithm_type == 'lca':
@@ -142,8 +151,12 @@ def run_for_viewpoints(config, viewpoint_list, save_dir):
         config_copy['lca'] = config_copy['lca'].copy()
         config_copy['lca']['db_path'] = save_dir
     
-    # Use the basic run function
     return run(config_copy)
+
+
+def run_for_viewpoints(config, viewpoint_list, save_dir):
+    """Run algorithm for specific viewpoints. (Legacy compatibility)"""
+    return run_for_field_values(config, {'viewpoint': viewpoint_list}, save_dir)
 
 
 def main(config):
@@ -161,17 +174,50 @@ def main(config):
     os.makedirs(db_path, exist_ok=True)
     
     try:
-        if data_params.get('separate_viewpoints', False):
-            # Run separately for each viewpoint
-            for viewpoint in data_params['viewpoint_list']:
-                print(f"Running for viewpoint: {viewpoint}")
-                logger.info(f"Running for viewpoint: {viewpoint}")
-                save_dir = os.path.join(data_params['output_path'], viewpoint)
+        # Handle field separation (generalized from viewpoint separation)
+        separate_by_fields = data_params.get('separate_by_fields')
+        if separate_by_fields is None and data_params.get('separate_viewpoints', False):
+            separate_by_fields = ['viewpoint']
+        
+        if separate_by_fields:
+            # Get field values: use config lists or discover from lightweight data loading
+            field_values = {}
+            
+            # First collect explicitly provided field lists
+            for field in separate_by_fields:
+                list_key = f"{field}_list"
+                if list_key in data_params:
+                    field_values[field] = data_params[list_key]
+            
+            # For fields without explicit lists, discover values
+            fields_to_discover = [f for f in separate_by_fields if f not in field_values]
+            if fields_to_discover:
+                df = load_dataframe_lightweight(config)
+                discovered_values = discover_field_values_from_df(df, fields_to_discover)
+                field_values.update(discovered_values)
+                for field, values in discovered_values.items():
+                    logger.info(f"Discovered {len(values)} values for '{field}': {values}")
+            
+            # Generate combinations for all fields
+            base_output = data_params['output_path']
+            field_names = list(field_values.keys())
+            value_lists = [field_values[field] for field in field_names]
+            
+            for values in itertools.product(*value_lists):
+                field_combo = dict(zip(field_names, values))
+                combo_str = '_'.join(f"{field}-{value}" for field, value in field_combo.items())
+                print(f"Running for: {combo_str}")
+                logger.info(f"Running for field combination: {field_combo}")
+                
+                save_dir = os.path.join(base_output, combo_str.replace(':', '_').replace('/', '_'))
                 os.makedirs(save_dir, exist_ok=True)
-                run_for_viewpoints(config, [viewpoint], save_dir)
-                config['logging']['file_mode'] = 'a'
+                run_for_field_values(config, field_combo, save_dir)
+                
+                # Append logs for subsequent runs
+                if 'logging' in config and isinstance(config['logging'], dict):
+                    config['logging']['file_mode'] = 'a'
         else:
-            # Run for all viewpoints together
+            # Single combined run
             run(config)
     
     finally:

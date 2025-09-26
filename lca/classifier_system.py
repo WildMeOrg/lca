@@ -125,7 +125,13 @@ class ClassifierManager:
             next_classifier = self.get_next_classifier(current_classifier)
             if next_classifier == 'human':
                 # Exhausted all algorithmic classifiers
-                edges_for_human.append((n0, n1))
+                if current_classifier is not 'human':
+                    logger.info(f"Edge ({n0}, {n1}) exhausted all algorithmic classifiers, requesting human review")
+                    embeddings, classifier = self.classifier_units[current_classifier]
+                    score = embeddings.get_score(n0, n1)
+                else:
+                    score = 1.0  # Default score for human-reviewed edges
+                edges_for_human.append((n0, n1, score))
             else:
                 # Use next algorithmic classifier
                 edge = self.classify_edge(n0, n1, next_classifier)

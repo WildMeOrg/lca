@@ -268,7 +268,7 @@ def generate_wgtr_calibration_ground_truth(verifier_edges,
                 i = 0
         else:
             n0, n1, s = bins[i][-1]
-            edge_nodes.append((n0, n1))
+            edge_nodes.append((n0, n1, s))
             edge_scores[(n0, n1)] = s
             del bins[i][-1]
             i = (i + 1) % len(bins)
@@ -354,7 +354,7 @@ def generate_ground_truth_random(verifier_edges,
         edges_batch = verifier_edges[i:j]
 
         # Get reviews from the human reviewer
-        reviews, quit_lca = human_reviewer([(n0, n1) for n0, n1, s in edges_batch])
+        reviews, quit_lca = human_reviewer([(n0, n1, s) for n0, n1, s in edges_batch])
 
         for n0, n1, b in reviews:
             e = (n0, n1, next(s for x0, x1, s in verifier_edges if x0 == n0 and x1 == n1))
@@ -393,7 +393,7 @@ def generate_ground_truth_full_dataset(verifier_edges,
         edges_batch = verifier_edges[i:j]
 
         # Get reviews from the human reviewer
-        reviews, quit_lca = human_reviewer([(n0, n1) for n0, n1, s in edges_batch])
+        reviews, quit_lca = human_reviewer([(n0, n1, s) for n0, n1, s in edges_batch])
 
         for n0, n1, b in reviews:
             e = (n0, n1, next(s for x0, x1, s in verifier_edges if x0 == n0 and x1 == n1))
@@ -455,7 +455,7 @@ def generate_wgtr_calibration_random_bins(verifier_edges,
     for i in range(len(bins)):
         batch_sz = np.clip(int(needed_total * len(bins[i])/len(scores)), min_samples_from_bin, len(bins[i]))
         rnd_edges = [bins[i][j] for j in np.random.choice(len(bins[i]), batch_sz, replace=False)]
-        edge_nodes = [(n0, n1) for (n0, n1, s) in rnd_edges]
+        edge_nodes = [(n0, n1,s) for (n0, n1, s) in rnd_edges]
         edge_scores = {(n0, n1):s for (n0, n1, s) in rnd_edges}
         reviews, quit_lca = human_reviewer(edge_nodes)
         # if quit_lca:
@@ -641,7 +641,7 @@ class curate_using_LCA(object):
                 #  review requests will have been previously communicated to the edge
                 #  generator.
                 requested_edges = self.edge_gen.get_edge_requests()
-                requested_edges = [(n0, n1) for n0, n1, _ in requested_edges]
+                requested_edges = [(n0, n1, s) for n0, n1, s in requested_edges]
 
                 logger.info(f'Received {len(requested_edges)} human review requests')
 

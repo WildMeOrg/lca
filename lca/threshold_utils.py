@@ -163,7 +163,7 @@ def find_residual_zero_crossing(residuals: np.ndarray, bin_centers: np.ndarray,
         return None, smoothed_residuals
     
     # Use leftmost crossing
-    return bin_centers[crossing_indices[0]], smoothed_residuals
+    return bin_centers[crossing_indices[-1]], smoothed_residuals
 
 
 def calculate_threshold_percentile(mean: float, std: float, percentile: float) -> float:

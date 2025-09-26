@@ -165,6 +165,54 @@ def save_pickle(x, file):
         result = pickle.dump(x, f_file)
     return result
 
+def load_dataframe_lightweight(config):
+    """Load dataframe without embeddings for field discovery."""
+    from preprocess import preprocess_data
+    
+    data_params = config['data']
+    
+    # Load embeddings just to get UUIDs
+    embeddings, uuids = load_pickle(data_params['embedding_file'])
+    
+    name_keys = data_params['name_keys']
+    format_type = data_params.get('format', 'drone')
+    id_key = data_params.get('id_key', 'uuid')
+    
+    df = preprocess_data(
+        data_params['annotation_file'],
+        name_keys=name_keys,
+        convert_names_to_ids=True,
+        n_filter_min=data_params['n_filter_min'],
+        n_filter_max=data_params['n_filter_max'],
+        images_dir=data_params.get('images_dir'),
+        embedding_uuids=uuids,
+        id_key=id_key,
+        format=format_type,
+        print_func=lambda x: None  # Silent loading
+    )
+    
+    # Filter to available UUIDs
+    filtered_df = df[df[id_key].isin(uuids)]
+    return filtered_df
+
+
+def discover_field_values_from_df(df, fields):
+    """Discover unique values for fields from dataframe."""
+    field_values = {}
+    for field in fields:
+        if field in df.columns:
+            unique_values = df[field].dropna().unique().tolist()
+        else:
+            # Try name_<field> pattern
+            name_field = f"name_{field}"
+            if name_field in df.columns:
+                unique_values = df[name_field].dropna().unique().tolist()
+            else:
+                continue
+        field_values[field] = sorted(unique_values, key=str)
+    return field_values
+
+
 def generate_ga_params(config):
     
     ga_params = dict()

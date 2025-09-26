@@ -111,18 +111,24 @@ def prepare_common(config):
     format_type = data_params.get('format', 'drone')  # 'old' or 'drone'
     id_key = data_params.get('id_key', 'uuid')
     
+    # Create field_filters from any {field}_list entries in config
+    field_filters = {}
+    for key in data_params:
+        if key.endswith('_list'):
+            field_name = key[:-5]  # Remove '_list' suffix
+            field_filters[field_name] = data_params[key]
+    
     df = preprocess_data(
         data_params['annotation_file'], 
-
         name_keys=name_keys,
         convert_names_to_ids=True, 
-        viewpoint_list=data_params['viewpoint_list'], 
         n_filter_min=data_params['n_filter_min'], 
         n_filter_max=data_params['n_filter_max'],
         images_dir=data_params['images_dir'], 
         embedding_uuids=uuids,
         id_key=id_key,
         format=format_type,
+        field_filters=field_filters,
         print_func=logger.info
     )
     
@@ -131,7 +137,12 @@ def prepare_common(config):
     # 2. Setup ground truth and validation
     logger.info("Setting up ground truth and validation...")
     filtered_df = df[df[id_key].isin(uuids)]
-    embeddings = [embeddings[uuids.index(uuid)] for uuid in filtered_df[id_key]]
+    
+    # Keep both filtered and unfiltered embeddings
+    filtered_embeddings = [embeddings[uuids.index(uuid)] for uuid in filtered_df[id_key]]
+    # Create node2uuid mapping for ALL data (for threshold calculation)
+    all_node2uuid = {i: uuid for i, uuid in enumerate(uuids)}
+    
     gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(filtered_df, filter_key, id_key)
     
     cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
@@ -140,14 +151,19 @@ def prepare_common(config):
         cluster_validator.trace_iter_compare_to_gt
     )
     
-    # 3. Create embeddings dictionary
+    # 3. Create embeddings dictionary (filtered for algorithm use)
     logger.info("Setting up embeddings...")
     distance_power = algorithm_config.get('distance_power', 1)
     embeddings_dict = {
-        'miewid': lazy(lambda: Embeddings(embeddings, node2uuid, distance_power=distance_power, print_func=logger.info)),
+        'miewid': lazy(lambda: Embeddings(filtered_embeddings, node2uuid, distance_power=distance_power, print_func=logger.info)),
         'binary': lazy(lambda: BinaryEmbeddings(node2uuid, df, filter_key)),
         'random': lazy(lambda: RandomEmbeddings()),
         'lightglue': lazy(lambda: LightglueEmbeddings(node2uuid, "lightglue_scores_superpoint.pickle")) # TODO: get the correct path
+    }
+    
+    # Create unfiltered embeddings for threshold calculation (when needed)
+    unfiltered_embeddings_dict = {
+        'miewid': lazy(lambda: Embeddings(embeddings, all_node2uuid, distance_power=distance_power, print_func=logger.info))
     }
     
     # 4. Setup human reviewer based on augmentation names (with backwards compatibility)
@@ -303,6 +319,7 @@ def prepare_common(config):
         plt.title(config.get("species", ""))
 
         plt.savefig(histogram_path)
+        plt.close()
 
     if 'output_path' in data_params:
         output_path = data_params['output_path']
@@ -319,9 +336,11 @@ def prepare_common(config):
     target_edges = algorithm_params.get('target_edges', 0)
     initial_topk = algorithm_params.get('initial_topk', 10)
 
-    # 8. Return common data
+
+    # 9. Return common data
     return {
         'embeddings_dict': embeddings_dict,
+        'unfiltered_embeddings_dict': unfiltered_embeddings_dict,
         'gt_clustering': gt_clustering,
         'gt_node2cid': gt_node2cid,
         'node2uuid': node2uuid,
@@ -673,10 +692,20 @@ def prepare_gc(common_data, config):
                     threshold_fraction = float(match.group(1))
                 else:
                     threshold_fraction = 0.15  # default
-                if isinstance(embeddings, types.FunctionType):
-                    common_data['embeddings_dict'][name] = embeddings
+                
+                # Use unfiltered embeddings for threshold calculation if available
+                unfiltered_embeddings_dict = common_data.get('unfiltered_embeddings_dict', {})
+                if name in unfiltered_embeddings_dict:
+                    thresh_embeddings = unfiltered_embeddings_dict[name]
+                    if isinstance(thresh_embeddings, types.FunctionType):
+                        thresh_embeddings = thresh_embeddings()
+                    logger.info(f"Using unfiltered embeddings for auto threshold calculation for {name}")
+                else:
+                    thresh_embeddings = embeddings
+                    logger.warning(f"No unfiltered embeddings available for {name}, using filtered embeddings for threshold")
+                
                 threshold = find_robust_threshold(
-                    np.array(embeddings.get_all_scores()), 
+                    np.array(thresh_embeddings.get_all_scores()), 
                     threshold_fraction=threshold_fraction,
                     print_func=logger.info, 
                     debug_plots=do_robust_plot, 
@@ -698,8 +727,20 @@ def prepare_gc(common_data, config):
             continue  # Handled by human_reviewer
         if name not in classifier_units:
             embeddings = common_data['embeddings_dict'].get(name)
+            
+            # Use unfiltered embeddings for auto threshold calculation if available
+            unfiltered_embeddings_dict = common_data.get('unfiltered_embeddings_dict', {})
+            if name in unfiltered_embeddings_dict:
+                thresh_embeddings = unfiltered_embeddings_dict[name]
+                if isinstance(thresh_embeddings, types.FunctionType):
+                    thresh_embeddings = thresh_embeddings()
+                logger.info(f"Using unfiltered embeddings for auto threshold calculation for {name}")
+            else:
+                thresh_embeddings = embeddings
+                logger.warning(f"No unfiltered embeddings available for {name}, using filtered embeddings for threshold")
+            
             # Fallback to default threshold
-            threshold = find_robust_threshold(np.array(embeddings.get_all_scores()), print_func=logger.info, debug_plots=do_robust_plot, plot_path=robust_plot_path)
+            threshold = find_robust_threshold(np.array(thresh_embeddings.get_all_scores()), print_func=logger.info, debug_plots=do_robust_plot, plot_path=robust_plot_path)
             classifier = ThresholdBasedClassifier(threshold)
             logger.warning(f"No weighter or threshold for {name}, using default auto threshold {threshold}")
             

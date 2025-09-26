@@ -69,7 +69,7 @@ def baseline_clustering(all_nodes, verifier_edges, human_reviewer, threshold):
     
     new_G.add_edges_from(strong_edges)
 
-    for_review = [(n1,n2) for (n1, n2, s) in verifier_edges if s <= high_threshold and s > low_threshold ]
+    for_review = [(n1,n2,s) for (n1, n2, s) in verifier_edges if s <= high_threshold and s > low_threshold ]
     
     num_human = len(for_review)
     reviews, quit = human_reviewer(for_review)
