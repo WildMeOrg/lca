@@ -131,10 +131,9 @@ class Embeddings(object):
 
         result = []
         start = 0
-        
+        embeds_num = len(ids)
+        total_edges = (embeds_num * embeds_num - embeds_num) / 2
         if target_proportion is None:
-            embeds_num = len(ids)
-            total_edges = (embeds_num * embeds_num - embeds_num) / 2
             target_proportion = np.clip(target_edges / max(1, total_edges), 0, 1)
         else:
             target_edges = int(total_edges * target_proportion)

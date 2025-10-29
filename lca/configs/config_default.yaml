@@ -4,6 +4,9 @@ comment: Experiment comment goes here
 algorithm_type: gc
 data:
   images_dir: /ekaterina/work/data/zebra/images
+  separate_by_fields: 
+    - encounter
+    - viewpoint
   viewpoint_list:
   - right
   name_keys:

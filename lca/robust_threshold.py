@@ -42,13 +42,14 @@ except ImportError:
     from threshold_visualization import create_diagnostic_plot
 
 
-def find_robust_threshold(data, bins=500, threshold_fraction=0.15, 
+def find_robust_threshold(data, bins=500, threshold_fraction=0.15,
                          fallback_percentile=85,
                          em_max_iter=200, em_random_state=42,
                          tail_sigma_threshold=0, residual_smoothing_sigma=0.01,
                          mode_tolerance_factor=0.1,
                          main_percentile=0.999,
-                         debug_plots=False, plot_path="dist.png", 
+                         regularization_strength=10.0,
+                         debug_plots=False, plot_path="dist.png",
                          print_func=print):
     """
     Robust threshold detection following a clear step-by-step algorithm:
@@ -85,6 +86,8 @@ def find_robust_threshold(data, bins=500, threshold_fraction=0.15,
         Tolerance for mode comparison as fraction of standard deviation
     main_percentile : float
         Percentile of Gaussian main distribution to use for Gamma fitting (0.9 = 90%)
+    regularization_strength : float
+        Strength of regularization for zero-density constraint in target distribution fitting
     debug_plots : bool
         Whether to save diagnostic plots
     plot_path : str
@@ -112,9 +115,9 @@ def find_robust_threshold(data, bins=500, threshold_fraction=0.15,
     
     # Steps 3-6: Analyze tail to find target distribution and threshold
     result = analyze_tail(
-        data, main_mean, main_std, tail_sigma_threshold, 
-        residual_smoothing_sigma, threshold_fraction, 
-        fallback_percentile, main_percentile, print_func
+        data, main_mean, main_std, tail_sigma_threshold,
+        residual_smoothing_sigma, threshold_fraction,
+        fallback_percentile, main_percentile, regularization_strength, print_func
     )
     
     # Add fit info to result
@@ -122,6 +125,7 @@ def find_robust_threshold(data, bins=500, threshold_fraction=0.15,
     
     if debug_plots:
         create_diagnostic_plot(data, result, bins, plot_path)
+        print_func(f"Diagnostic plot saved to {plot_path}")
     
     threshold = result['threshold']
     print_func(f"Final threshold (p{threshold_fraction:.2f}): {threshold:.4f}")
@@ -228,8 +232,8 @@ def fit_main_distribution(data, gmm_result, mode_tolerance_factor, print_func):
 
 
 def analyze_tail(data, main_mean, main_std, tail_sigma_threshold,
-                residual_smoothing_sigma, threshold_fraction, 
-                fallback_percentile, main_percentile, print_func):
+                residual_smoothing_sigma, threshold_fraction,
+                fallback_percentile, main_percentile, regularization_strength, print_func):
     """
     Analyze tail of distribution to find target component and threshold.
     
@@ -329,16 +333,22 @@ def analyze_tail(data, main_mean, main_std, tail_sigma_threshold,
             cutoff_value = tail_threshold
     
     # Step 5: Fit target distribution (mirrored Gamma)
-    shape, loc, scale, mirror_point = fit_mirrored_gamma(target_samples)
-    
+    # Pass main_mean as the point where we want near-zero density
+    shape, loc, scale, mirror_point = fit_mirrored_gamma(
+        target_samples,
+        zero_density_point=main_mean,
+        regularization_strength=regularization_strength
+    )
+
     # Calculate mean and std for compatibility
     gamma_mean = loc + shape * scale  # Gamma mean in mirrored space
     gamma_var = shape * scale**2      # Gamma variance
     target_mean = mirror_point - gamma_mean  # Mean in original space
     target_std = np.sqrt(gamma_var)  # Std is same
-    
+
     print_func(f"    Target distribution (mirrored Gamma): shape={shape:.3f}, loc={loc:.3f}, "
                f"scale={scale:.3f}, mirror={mirror_point:.3f}")
+    print_func(f"    Regularized with zero-density at main mode={main_mean:.3f}, strength={regularization_strength:.1f}")
     print_func(f"    Equivalent mean={target_mean:.3f}, std={target_std:.3f}")
     print_func(f"    Using {len(target_samples)} samples beyond cutoff={cutoff_value:.3f}")
     

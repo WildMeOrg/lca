@@ -31,6 +31,10 @@ class TrackingIdEmbeddings(Embeddings):
 
         print_func(f"Created TrackingIdEmbeddings with {len(self.embeddings)} embeddings")
     
+    def get_base(self):
+        """Return the base embeddings without filtering."""
+        return Embeddings(self.embeddings, self.uuids, self.distance_power, self.print_func)
+
     @classmethod
     def from_embeddings(cls, 
                         base_embeddings,

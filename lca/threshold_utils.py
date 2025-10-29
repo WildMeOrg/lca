@@ -280,18 +280,26 @@ def check_mode_similarity(mode1: float, mode2: float, reference_std: float,
     return abs(mode1 - mode2) < tolerance
 
 
-def fit_mirrored_gamma(data: np.ndarray) -> tuple[float, float, float, float]:
+def fit_mirrored_gamma(data: np.ndarray, zero_density_point: float = None,
+                      regularization_strength: float = 1.0) -> tuple[float, float, float, float]:
     """
     Fit mirrored Gamma distribution to data with left tail.
-    
+
     The Gamma distribution naturally has a right tail, so we mirror the data
-    to model a left tail distribution.
-    
+    to model a left tail distribution. Optionally applies regularization to
+    enforce near-zero density at a specified point.
+
     Parameters:
     -----------
     data : array
         Data values to fit (should have left tail)
-        
+    zero_density_point : float, optional
+        Point where density should be near zero (e.g., negative distribution mode)
+        If None, uses standard unregularized fitting
+    regularization_strength : float
+        Strength of regularization penalty (higher = stronger constraint)
+        Only used if zero_density_point is provided
+
     Returns:
     --------
     tuple
@@ -299,14 +307,72 @@ def fit_mirrored_gamma(data: np.ndarray) -> tuple[float, float, float, float]:
     """
     # Find mirror point with small buffer for numerical stability
     mirror_point = np.max(data) + 1e-6
-    
+
     # Mirror the data
     mirrored_data = mirror_point - data
-    
-    # Fit Gamma with loc fixed at 0
-    shape, _, scale = stats.gamma.fit(mirrored_data, floc=0)
-    loc = 0
-    
+
+    if zero_density_point is None:
+        # Standard unregularized fitting
+        shape, _, scale = stats.gamma.fit(mirrored_data, floc=0)
+        loc = 0
+    else:
+        # Regularized fitting with zero-density constraint
+        from scipy.optimize import minimize
+
+        # Initial estimate from standard fit
+        initial_shape, _, initial_scale = stats.gamma.fit(mirrored_data, floc=0)
+
+        # Transform zero_density_point to mirrored space
+        mirrored_zero_point = mirror_point - zero_density_point
+
+        def objective(params):
+            shape, scale = params
+            if shape <= 0 or scale <= 0:
+                return 1e10  # Invalid parameters
+
+            # Negative log-likelihood
+            try:
+                nll = -np.sum(stats.gamma.logpdf(mirrored_data, shape, loc=0, scale=scale))
+            except:
+                return 1e10
+
+            # Regularization: penalize density at zero_density_point
+            # Only apply penalty if point is in valid range
+            if mirrored_zero_point > 0:
+                density = stats.gamma.pdf(mirrored_zero_point, shape, loc=0, scale=scale)
+                # Use exponential penalty for stronger effect when density is high
+                # Also scale by data size to balance with likelihood
+                penalty = regularization_strength * len(mirrored_data) * (density ** 4)
+            else:
+                penalty = 0  # Point is outside distribution support
+
+            return nll + penalty
+
+        # Debug: Check initial density at zero point
+        initial_density = stats.gamma.pdf(mirrored_zero_point, initial_shape, loc=0, scale=initial_scale)
+
+        # Optimize
+        result = minimize(
+            objective,
+            x0=[initial_shape, initial_scale],
+            method='L-BFGS-B',
+            bounds=[(0.1, 100), (0.001, 10)]  # Reasonable bounds for shape and scale
+        )
+
+        if result.success:
+            shape, scale = result.x
+            loc = 0
+
+            # Debug: Check final density at zero point
+            final_density = stats.gamma.pdf(mirrored_zero_point, shape, loc=0, scale=scale)
+            print(f"    DEBUG: Regularization - initial density at {zero_density_point:.3f}: {initial_density:.6f}, "
+                  f"final: {final_density:.6f} (mirrored point: {mirrored_zero_point:.3f})")
+        else:
+            # Fall back to unregularized fit if optimization fails
+            print(f"    WARNING: Regularized optimization failed, using unregularized fit")
+            shape, scale = initial_shape, initial_scale
+            loc = 0
+
     return shape, loc, scale, mirror_point
 
 

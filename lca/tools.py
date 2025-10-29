@@ -112,7 +112,7 @@ def get_review(node_1, node_2, df, name_key, rate=0.98):
 def call_get_reviews(df, name_key, rate):
     def get_reviews(edge_nodes, rate=rate):
         logger = logging.getLogger('lca')
-        reviews = [(n0, n1, get_review(n0, n1, df, name_key, rate)) for n0, n1 in edge_nodes]
+        reviews = [(n0, n1, get_review(n0, n1, df, name_key, rate)) for n0, n1, _ in edge_nodes]
         # quit_lca = random.random() < 0.4
         quit_lca = False
         return reviews, quit_lca

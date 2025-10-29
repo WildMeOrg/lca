@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 
+from negative_only_embeddings import NegativeOnlyEmbeddings
 from preprocess import preprocess_data
 from embeddings import Embeddings
 from embeddings_lightglue import LightglueEmbeddings
@@ -32,6 +33,7 @@ from classifier_system import ClassifierManager, WeighterBasedClassifier, Thresh
 from metadata_verifier import MetadataEmbeddings
 from tracking_id_verifier import TrackingIdEmbeddings
 from robust_threshold import find_robust_threshold
+from hdbscan_algorithm import HDBSCANAlgorithm
 
 logger = logging.getLogger('lca')
 
@@ -48,7 +50,7 @@ def parse_verifier_names(verifier_names):
     """
     parsed_verifiers = []
     
-    meta_names = ['metadata', 'tracking']
+    meta_names = ['metadata', 'tracking', 'negative_only']
 
     i = 0
     while i < len(verifier_names):
@@ -220,8 +222,8 @@ def prepare_common(config):
     
     # Final fallback: default to simulated if no human type found
     if human_reviewer is None:
-        logger.info("No human reviewer type specified, defaulting to simulated_human")
-        human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)
+        logger.info("No human reviewer type specified, defaulting to no_human")
+        human_reviewer = lambda _: ([], True)
     
     # 5. Setup synthetic embeddings if needed
     verifier_name = algorithm_config.get('verifier_name', 'miewid')
@@ -250,6 +252,12 @@ def prepare_common(config):
             base_embeddings = embeddings_dict[base_name]()
             embeddings_dict[f'tracking({base_name})'] = lazy(lambda: TrackingIdEmbeddings.from_embeddings(
                 base_embeddings, df, node2uuid, id_key, tracking_key='tracking_id', multiplier=1)
+            )
+        elif name == 'negative_only':
+            # Create tracking ID wrapper
+            base_embeddings = embeddings_dict[base_name]()
+            embeddings_dict[f'negative_only({base_name})'] = lazy(lambda: NegativeOnlyEmbeddings.from_embeddings(
+                base_embeddings, df, node2uuid, id_key, class_key='tracking_id', multiplier=1)
             )
 
     logger.info("Computing and logging verifier performance statistics...")
@@ -334,6 +342,7 @@ def prepare_common(config):
 
     algorithm_params = config.get('algorithm', {})
     target_edges = algorithm_params.get('target_edges', 0)
+    target_proportion = algorithm_params.get('target_proportion', None)
     initial_topk = algorithm_params.get('initial_topk', 10)
 
 
@@ -354,7 +363,8 @@ def prepare_common(config):
         'verifier_name': verifier_name,
         'output_path': output_path,
         'target_edges': target_edges,
-        'initial_topk': initial_topk
+        'initial_topk': initial_topk,
+        'target_proportion': target_proportion
     }
 
 
@@ -651,6 +661,8 @@ def prepare_gc(common_data, config):
     edge_weights = config.get('edge_weights', config.get('lca', {}).get('edge_weights', {}))
     
     gc_config['theta'] = gc_config.get('theta', config.get('gc', 0.1).get('theta', 0.1))
+    logger.info(f"THETA {gc_config['theta']}")
+    print(f"THETA {gc_config['theta']}")
     gc_config['prob_human_correct'] = common_data.get('prob_human_correct', 0.98)
     gc_config['max_densify_edges'] = gc_config.get('max_densify_edges', 200)
 
@@ -703,7 +715,8 @@ def prepare_gc(common_data, config):
                 else:
                     thresh_embeddings = embeddings
                     logger.warning(f"No unfiltered embeddings available for {name}, using filtered embeddings for threshold")
-                
+                if hasattr(embeddings, 'get_base'):
+                    thresh_embeddings = embeddings.get_base()
                 threshold = find_robust_threshold(
                     np.array(thresh_embeddings.get_all_scores()), 
                     threshold_fraction=threshold_fraction,
@@ -786,6 +799,8 @@ def create_algorithm(config):
         algorithm = prepare_lca(common_data, config)
     elif algorithm_type == 'gc':
         algorithm = prepare_gc(common_data, config)
+    elif algorithm_type == 'hdbscan':
+        algorithm = prepare_hdbscan(common_data, config)
     else:
         raise ValueError(f"Unknown algorithm type: {algorithm_type}")
     
@@ -793,6 +808,29 @@ def create_algorithm(config):
 
 
     return algorithm, common_data
+
+
+def prepare_hdbscan(common_data, config):
+    """
+    Prepare HDBSCAN algorithm instance.
+
+    Args:
+        common_data: Common data from prepare_common
+        config: Configuration dictionary
+
+    Returns:
+        HDBSCANAlgorithm: Configured HDBSCAN algorithm instance
+    """
+    # Get all nodes from node2uuid mapping
+    all_nodes = list(common_data['node2uuid'].keys())
+
+    # Get embeddings dictionary
+    embeddings_dict = common_data['embeddings_dict']
+
+    # Create and return HDBSCAN instance
+    hdbscan_instance = HDBSCANAlgorithm(config, all_nodes, embeddings_dict)
+
+    return hdbscan_instance
 
 
 def call_verifier_alg(embeddings):

@@ -27,6 +27,8 @@ class GraphConsistencyAlgorithm(object):
         self.tries_before_edge_done = config.get('tries_before_edge_done', 4)
         self.human_attempts = {}
 
+        print(f"self.THETA {self.config['theta']}")
+
     def filter_for_review(self, edges_for_human):
         logger = logging.getLogger('lca')
         final_for_review = []

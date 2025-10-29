@@ -28,7 +28,9 @@ def get_initial_edges(common_data, config):
     
     
     # Get raw edges
-    raw_edges = list(verifier_embeddings.get_edges(target_edges=common_data['target_edges'], topk=common_data['initial_topk']))
+    raw_edges = list(verifier_embeddings.get_edges(target_edges=common_data['target_edges'], 
+                                                   topk=common_data['initial_topk'],
+                                                   target_proportion=common_data['target_proportion']))
     raw_edges = [(*n, verifier_name) for n in raw_edges]
 
     return raw_edges
