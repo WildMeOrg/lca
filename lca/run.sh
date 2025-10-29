@@ -13,4 +13,11 @@
 
 
 # python3 run.py --config ./configs/config_whaleshark.yaml
-python3 run.py --config ./configs/config_GZCD.yaml -i
+# python3 run.py --config ./configs/lca_image.yaml -i
+
+# python3 run.py --config ./configs/lca_hdbscan_drone.yaml -i
+
+# python3 run_clustering_with_save.py --config ./configs/lca_hdbscan_drone_edit.yaml --output_prefix hdbscan --output_suffix clustered -i 
+
+python3 run_clustering_with_save.py \
+    --config ./configs/lca_hdbscan_drone_edit.yaml 
