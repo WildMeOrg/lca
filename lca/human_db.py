@@ -99,6 +99,8 @@ class human_db(object):
         if not os.path.exists(self.db_path):
             print("DB doesn't exist")
             self.init_db(self.db_path)
+            if not os.path.exists(self.db_path):
+                raise RuntimeError(f"Failed to create DB at {self.db_path}")
 
         reviews = []
         with sqlite3.connect(self.db_path) as conn:
