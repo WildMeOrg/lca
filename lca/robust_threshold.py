@@ -45,7 +45,7 @@ except ImportError:
 def find_robust_threshold(data, bins=500, threshold_fraction=0.15,
                          fallback_percentile=85,
                          em_max_iter=200, em_random_state=42,
-                         tail_sigma_threshold=0, residual_smoothing_sigma=0.01,
+                         tail_sigma_threshold=3, residual_smoothing_sigma=0.01,
                          mode_tolerance_factor=0.1,
                          main_percentile=0.999,
                          regularization_strength=10.0,

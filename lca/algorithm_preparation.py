@@ -33,7 +33,10 @@ from classifier_system import ClassifierManager, WeighterBasedClassifier, Thresh
 from metadata_verifier import MetadataEmbeddings
 from tracking_id_verifier import TrackingIdEmbeddings
 from robust_threshold import find_robust_threshold
+from robust_gmm_threshold import find_threshold as robust_gmm_find_threshold
 from hdbscan_algorithm import HDBSCANAlgorithm
+from manual_review_algorithm import ManualReviewAlgorithm
+from thresholded_review_algorithm import ThresholdedReviewAlgorithm
 
 logger = logging.getLogger('lca')
 
@@ -717,11 +720,17 @@ def prepare_gc(common_data, config):
                     logger.warning(f"No unfiltered embeddings available for {name}, using filtered embeddings for threshold")
                 if hasattr(embeddings, 'get_base'):
                     thresh_embeddings = embeddings.get_base()
-                threshold = find_robust_threshold(
+                # threshold = find_robust_threshold(
+                #     np.array(thresh_embeddings.get_all_scores()), 
+                #     threshold_fraction=threshold_fraction,
+                #     print_func=logger.info, 
+                #     debug_plots=do_robust_plot, 
+                #     plot_path=robust_plot_path
+                # )
+                threshold = robust_gmm_find_threshold(
                     np.array(thresh_embeddings.get_all_scores()), 
-                    threshold_fraction=threshold_fraction,
-                    print_func=logger.info, 
-                    debug_plots=do_robust_plot, 
+                    verbose=True, 
+                    print_func=logger.info,
                     plot_path=robust_plot_path
                 )
             elif threshold in classifier_units:
@@ -753,7 +762,13 @@ def prepare_gc(common_data, config):
                 logger.warning(f"No unfiltered embeddings available for {name}, using filtered embeddings for threshold")
             
             # Fallback to default threshold
-            threshold = find_robust_threshold(np.array(thresh_embeddings.get_all_scores()), print_func=logger.info, debug_plots=do_robust_plot, plot_path=robust_plot_path)
+            # threshold = find_robust_threshold(np.array(thresh_embeddings.get_all_scores()), print_func=logger.info, debug_plots=do_robust_plot, plot_path=robust_plot_path)
+            threshold = robust_gmm_find_threshold(
+                    np.array(thresh_embeddings.get_all_scores()), 
+                    verbose=True, 
+                    print_func=logger.info,
+                    plot_path=robust_plot_path,
+                )
             classifier = ThresholdBasedClassifier(threshold)
             logger.warning(f"No weighter or threshold for {name}, using default auto threshold {threshold}")
             
@@ -794,13 +809,17 @@ def create_algorithm(config):
     
     # Create algorithm based on config
     algorithm_type = config.get('algorithm_type', 'gc')  # Default to GC
-    
+
     if algorithm_type == 'lca':
         algorithm = prepare_lca(common_data, config)
     elif algorithm_type == 'gc':
         algorithm = prepare_gc(common_data, config)
     elif algorithm_type == 'hdbscan':
         algorithm = prepare_hdbscan(common_data, config)
+    elif algorithm_type == 'manual_review':
+        algorithm = prepare_manual_review(common_data, config)
+    elif algorithm_type == 'thresholded_review':
+        algorithm = prepare_thresholded_review(common_data, config)
     else:
         raise ValueError(f"Unknown algorithm type: {algorithm_type}")
     
@@ -831,6 +850,44 @@ def prepare_hdbscan(common_data, config):
     hdbscan_instance = HDBSCANAlgorithm(config, all_nodes, embeddings_dict)
 
     return hdbscan_instance
+
+
+def prepare_manual_review(common_data, config):
+    """
+    Prepare Manual Review algorithm instance.
+
+    Args:
+        common_data: Common data from prepare_common
+        config: Configuration dictionary
+
+    Returns:
+        ManualReviewAlgorithm: Configured Manual Review algorithm instance
+    """
+    # Get manual_review config section if it exists, otherwise use defaults
+    manual_config = config.get('manual_review', {})
+
+    # Create and return Manual Review instance
+    manual_instance = ManualReviewAlgorithm(manual_config, common_data)
+    return manual_instance
+
+
+def prepare_thresholded_review(common_data, config):
+    """
+    Prepare Thresholded Review algorithm instance.
+
+    Args:
+        common_data: Common data from prepare_common
+        config: Configuration dictionary
+
+    Returns:
+        ThresholdedReviewAlgorithm: Configured Thresholded Review algorithm instance
+    """
+    # Get thresholded_review config section if it exists, otherwise use defaults
+    thresholded_config = config.get('thresholded_review', {})
+
+    # Create and return Thresholded Review instance
+    thresholded_instance = ThresholdedReviewAlgorithm(thresholded_config, common_data)
+    return thresholded_instance
 
 
 def call_verifier_alg(embeddings):

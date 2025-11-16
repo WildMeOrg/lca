@@ -39,14 +39,22 @@ def get_initial_edges(common_data, config):
 def get_human_responses(requested_edges, common_data):
     """Get human responses in unified format."""
     human_reviewer = common_data['human_reviewer']
-    human_reviews, quit = human_reviewer(requested_edges)
-    
+
+    # Handle both 3-tuple (n0, n1, score) and 4-tuple (n0, n1, score, source) formats
+    if requested_edges and len(requested_edges[0]) == 4:
+        # Extract just the first 3 elements for human reviewer
+        edges_for_review = [(edge[0], edge[1], edge[2]) for edge in requested_edges]
+    else:
+        edges_for_review = requested_edges
+
+    human_reviews, quit = human_reviewer(edges_for_review)
+
     # Convert to unified format - use 'human' for all human responses for simplicity
     unified_responses = []
     for n0, n1, decision in human_reviews:
         score = 1.0 if decision else 0.0
         unified_responses.append((n0, n1, score, 'human'))
-    
+
     return unified_responses, quit
 
 
