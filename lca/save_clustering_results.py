@@ -26,7 +26,7 @@ def save_json(data, path):
 
 
 def save_clustering_results(input_dir, anno_file, output_path, prefix, suffix,
-                          field_filters=None, uuid_key="annot_uuid"):
+                          field_filters=None, uuid_key="annot_uuid", output_key="cluster_id"):
     """
     Save clustering results with support for multiple field filtering.
 
@@ -38,6 +38,7 @@ def save_clustering_results(input_dir, anno_file, output_path, prefix, suffix,
         suffix: Output filename suffix
         field_filters: dict of {field_name: field_value} to filter on
         uuid_key: Key for UUID in annotations (default: annot_uuid)
+        output_key: Key name for saving cluster IDs (default: cluster_id)
     """
     clustering_file = os.path.join(input_dir, "clustering.json")
     node2uuid_file = os.path.join(input_dir, "node2uuid_file.json")
@@ -103,20 +104,20 @@ def save_clustering_results(input_dir, anno_file, output_path, prefix, suffix,
         else:
             filtered_annotations = annotations
 
-        # Add cluster_id to each annotation while preserving all original fields
+        # Add cluster ID to each annotation while preserving all original fields
         updated_annotations = []
         assigned_count = 0
         for ann in filtered_annotations:
             # Create a copy to preserve all original fields
             updated_ann = ann.copy()
 
-            # Add cluster_id field based on UUID mapping
+            # Add cluster ID field based on UUID mapping (using output_key)
             cluster_id = uuid_to_cluster.get(ann.get(uuid_key))
             if cluster_id is not None:
-                updated_ann['cluster_id'] = cluster_id
+                updated_ann[output_key] = cluster_id
                 assigned_count += 1
             else:
-                updated_ann['cluster_id'] = None
+                updated_ann[output_key] = None
 
             updated_annotations.append(updated_ann)
 
@@ -139,7 +140,7 @@ def save_clustering_results(input_dir, anno_file, output_path, prefix, suffix,
 
 
 def process_field_separated_results(base_path, anno_file, output_path, prefix, suffix,
-                                   separate_by_fields, uuid_key="annot_uuid"):
+                                   separate_by_fields, uuid_key="annot_uuid", output_key="cluster_id"):
     """
     Process results that were separated by fields during clustering.
 
@@ -151,6 +152,7 @@ def process_field_separated_results(base_path, anno_file, output_path, prefix, s
         suffix: Output filename suffix
         separate_by_fields: List of field names used for separation
         uuid_key: Key for UUID in annotations
+        output_key: Key name for saving cluster IDs (default: cluster_id)
     """
     # Build regex pattern to match and extract field values
     regex_pattern = "_".join([f"{field}-([^_]+)" for field in separate_by_fields])
@@ -172,7 +174,7 @@ def process_field_separated_results(base_path, anno_file, output_path, prefix, s
                 field_combo = dict(zip(separate_by_fields, match.groups()))
                 print(f"\nProcessing: {field_combo}")
                 save_clustering_results(input_dir, anno_file, output_path, prefix, suffix,
-                                      field_filters=field_combo, uuid_key=uuid_key)
+                                      field_filters=field_combo, uuid_key=uuid_key, output_key=output_key)
 
 
 def main():
@@ -192,6 +194,8 @@ def main():
                        help="Output filename suffix (default: results)")
     parser.add_argument("--uuid_key", type=str, default="uuid",
                        help="Key for UUID in annotations (default: uuid)")
+    parser.add_argument("--output_key", type=str, default="cluster_id",
+                       help="Key name for saving cluster IDs (default: cluster_id)")
 
     # Field separation options
     parser.add_argument("--separate_by_fields", nargs='+',
@@ -210,7 +214,8 @@ def main():
             args.prefix,
             args.suffix,
             args.separate_by_fields,
-            args.uuid_key
+            args.uuid_key,
+            args.output_key
         )
     elif args.field_values:
         # Process specific field combination
@@ -226,7 +231,8 @@ def main():
             args.prefix,
             args.suffix,
             field_filters,
-            args.uuid_key
+            args.uuid_key,
+            args.output_key
         )
     else:
         # Process without field filtering
@@ -236,7 +242,8 @@ def main():
             args.output_dir,
             args.prefix,
             args.suffix,
-            uuid_key=args.uuid_key
+            uuid_key=args.uuid_key,
+            output_key=args.output_key
         )
 
 

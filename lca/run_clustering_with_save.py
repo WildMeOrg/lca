@@ -282,7 +282,8 @@ def main():
     uuid_key = data_config.get('id_key', 'uuid')
     separate_by_fields = data_config.get('separate_by_fields')
     name_keys = data_config.get('name_keys', [])
-
+    output_key = data_config.get('output_key', 'cluster_id')  # New: get output_key from config
+    
     # Get log file from config
     logging_config = config.get('logging', {})
     config_log_file = logging_config.get('log_file')
@@ -333,10 +334,12 @@ def main():
             "--prefix", args.output_prefix,
             "--suffix", args.output_suffix,
             "--uuid_key", uuid_key,
+            "--output_key", output_key,  # Pass output_key to save script
             "--separate_by_fields"
         ] + separate_by_fields
 
         print(f"Processing field-separated results...")
+        print(f"Using output key: '{output_key}'")
     else:
         # Handle single result
         cmd = [
@@ -346,10 +349,12 @@ def main():
             save_dir,
             "--prefix", args.output_prefix,
             "--suffix", args.output_suffix,
-            "--uuid_key", uuid_key
+            "--uuid_key", uuid_key,
+            "--output_key", output_key  # Pass output_key to save script
         ]
 
         print(f"Processing single clustering result...")
+        print(f"Using output key: '{output_key}'")
 
     result = subprocess.run(cmd, capture_output=False, text=True)
     if result.returncode != 0:
