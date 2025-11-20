@@ -12,8 +12,8 @@ import json
 import datetime
 from cluster_tools import percent_and_PR, build_node_to_cluster_mapping
 # Import clustering functions directly
-from run import run as run_clustering
-from save_clustering_results import save_clustering_results, process_field_separated_results
+from run import main as run_clustering
+from save_clustering_results import save_clustering_results, combine_field_separated_results
 
 
 def load_config(config_path):
@@ -338,12 +338,12 @@ def main():
 
     try:
         if separate_by_fields:
-            # Handle field-separated results
-            print(f"Processing field-separated results...")
+            # Handle field-separated results - combine into single file
+            print(f"Combining field-separated results into single file...")
             print(f"Using output key: '{output_key}'")
 
-            # Call process_field_separated_results function directly
-            process_field_separated_results(
+            # Call combine_field_separated_results function directly
+            combine_field_separated_results(
                 base_path=output_base,
                 anno_file=anno_file,
                 output_path=save_dir,

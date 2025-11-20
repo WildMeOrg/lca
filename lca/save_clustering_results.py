@@ -127,9 +127,25 @@ def save_clustering_results(input_dir, anno_file, output_path, prefix, suffix,
     # Build output path
     if field_filters:
         field_str = '_'.join(f"{k}-{v}" for k, v in field_filters.items())
-        output_filename = f"{prefix}_{field_str}_{suffix}.json"
+        # Build filename with optional prefix and suffix
+        parts = []
+        if prefix:
+            parts.append(prefix)
+        parts.append(field_str)
+        if suffix:
+            parts.append(suffix)
+        output_filename = '_'.join(parts) + '.json' if parts else 'output.json'
     else:
-        output_filename = f"{prefix}_{suffix}.json"
+        # Build filename with optional prefix and suffix
+        parts = []
+        if prefix:
+            parts.append(prefix)
+        if suffix:
+            parts.append(suffix)
+        if parts:
+            output_filename = '_'.join(parts) + '.json'
+        else:
+            output_filename = 'output.json'
 
     output_path_full = os.path.join(output_path, output_filename)
 
@@ -139,10 +155,133 @@ def save_clustering_results(input_dir, anno_file, output_path, prefix, suffix,
     print(f"Saved clustering results to {output_path_full}")
 
 
+def combine_field_separated_results(base_path, anno_file, output_path, prefix, suffix,
+                                   separate_by_fields, uuid_key="annot_uuid", output_key="cluster_id"):
+    """
+    Combine results that were separated by fields during clustering into a single file.
+    Ensures unique cluster IDs across all field separations.
+
+    Args:
+        base_path: Base directory containing field-separated subdirectories
+        anno_file: Path to original annotation file
+        output_path: Directory to save output
+        prefix: Output filename prefix
+        suffix: Output filename suffix
+        separate_by_fields: List of field names used for separation
+        uuid_key: Key for UUID in annotations
+        output_key: Key name for saving cluster IDs (default: cluster_id)
+    """
+    # Build regex pattern to match and extract field values
+    regex_pattern = "_".join([f"{field}-([^_]+)" for field in separate_by_fields])
+    regex = re.compile(regex_pattern)
+
+    # Find all directories matching the pattern
+    glob_pattern = "_".join([f"{field}-*" for field in separate_by_fields])
+    pattern_path = os.path.join(base_path, glob_pattern)
+
+    print(f"Looking for directories matching: {pattern_path}")
+
+    # Load original annotation file
+    original_data = load_json(anno_file)
+
+    # Create result dict with same structure
+    result_dict = {}
+    if 'categories' in original_data:
+        result_dict['categories'] = original_data['categories']
+    if 'images' in original_data:
+        result_dict['images'] = original_data['images']
+
+    # Collect all UUID to cluster mappings with unique cluster IDs
+    global_uuid_to_cluster = {}
+    cluster_id_offset = 0
+
+    # Process each field-separated directory
+    dirs_processed = 0
+    for input_dir in sorted(glob.glob(pattern_path)):
+        if os.path.isdir(input_dir):
+            dir_name = os.path.basename(input_dir)
+            match = regex.match(dir_name)
+
+            if match:
+                # Extract field values from regex groups
+                field_combo = dict(zip(separate_by_fields, match.groups()))
+                print(f"\nProcessing: {field_combo}")
+
+                # Load clustering results for this field combination
+                clustering_file = os.path.join(input_dir, "clustering.json")
+                node2uuid_file = os.path.join(input_dir, "node2uuid_file.json")
+
+                if not (os.path.exists(clustering_file) and os.path.exists(node2uuid_file)):
+                    print(f"  Warning: Missing files in {input_dir}")
+                    continue
+
+                clusters = load_json(clustering_file)
+                node2uuid = load_json(node2uuid_file)
+
+                # Build mapping with offset cluster IDs to ensure uniqueness
+                for cluster_id, nodes in clusters.items():
+                    # Create new unique cluster ID
+                    new_cluster_id = f"cls{cluster_id_offset}"
+                    cluster_id_offset += 1
+
+                    for node in nodes:
+                        uuid = node2uuid.get(str(node))
+                        if uuid:
+                            # Include field values in the cluster assignment for tracking
+                            global_uuid_to_cluster[uuid] = new_cluster_id
+
+                dirs_processed += 1
+
+    print(f"\nProcessed {dirs_processed} field-separated directories")
+    print(f"Total unique clusters: {cluster_id_offset}")
+    print(f"Total UUIDs with cluster assignments: {len(global_uuid_to_cluster)}")
+
+    # Apply cluster IDs to all annotations
+    if 'annotations' in original_data:
+        updated_annotations = []
+        assigned_count = 0
+
+        for ann in original_data['annotations']:
+            # Create a copy to preserve all original fields
+            updated_ann = ann.copy()
+
+            # Add cluster ID field based on UUID mapping
+            cluster_id = global_uuid_to_cluster.get(ann.get(uuid_key))
+            if cluster_id is not None:
+                updated_ann[output_key] = cluster_id
+                assigned_count += 1
+            else:
+                updated_ann[output_key] = None
+
+            updated_annotations.append(updated_ann)
+
+        print(f"Assigned cluster IDs to {assigned_count}/{len(updated_annotations)} annotations")
+        result_dict['annotations'] = updated_annotations
+
+    # Build output filename
+    parts = []
+    if prefix:
+        parts.append(prefix)
+    if suffix:
+        parts.append(suffix)
+    if parts:
+        output_filename = '_'.join(parts) + '.json'
+    else:
+        output_filename = 'output.json'
+
+    output_path_full = os.path.join(output_path, output_filename)
+
+    # Save final result
+    os.makedirs(os.path.dirname(output_path_full) if os.path.dirname(output_path_full) else '.', exist_ok=True)
+    save_json(result_dict, output_path_full)
+    print(f"Saved combined clustering results to {output_path_full}")
+
+
 def process_field_separated_results(base_path, anno_file, output_path, prefix, suffix,
                                    separate_by_fields, uuid_key="annot_uuid", output_key="cluster_id"):
     """
     Process results that were separated by fields during clustering.
+    Creates separate output files for each field combination.
 
     Args:
         base_path: Base directory containing field-separated subdirectories
