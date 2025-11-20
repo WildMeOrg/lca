@@ -145,7 +145,7 @@ def save_clustering_results(input_dir, anno_file, output_path, prefix, suffix,
         if parts:
             output_filename = '_'.join(parts) + '.json'
         else:
-            output_filename = 'output.json'
+            output_filename = 'lca_annots.json'
 
     output_path_full = os.path.join(output_path, output_filename)
 
@@ -221,7 +221,7 @@ def combine_field_separated_results(base_path, anno_file, output_path, prefix, s
                 # Build mapping with offset cluster IDs to ensure uniqueness
                 for cluster_id, nodes in clusters.items():
                     # Create new unique cluster ID
-                    new_cluster_id = f"cls{cluster_id_offset}"
+                    new_cluster_id = str(cluster_id_offset)
                     cluster_id_offset += 1
 
                     for node in nodes:
