@@ -23,8 +23,8 @@
 #     --config ./configs/lca_hdbscan_drone_edit.yaml 
 
 # python3 run_clustering_with_save.py \
-#     --config ./configs/GZCD/config_GZCD.yaml \
-#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/GZCD/gc_clustering/
+#     --config ./configs/config_manual_review_GZCD.yaml \
+#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/GZCD/manual_review_clustering/
     
 
 # python3 run_clustering_with_save.py \
@@ -33,38 +33,37 @@
  
 # beluga
 #  python3 run_clustering_with_save.py \
-#     --config ./configs/beluga/config_beluga.yaml \
-#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/beluga/gc_clustering/
+#     --config ./configs/beluga/config_manual_review_beluga.yaml \
+#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/beluga/manual_review_clustering/
 
-
-# # forest elephants
- python3 run_clustering_with_save.py \
-    --config ./configs/forestelephants/config_forestelephants.yaml \
-    --save_dir /fs/ess/PAS2136/ggr_data/results/kate/forestelephants/gc_clustering_new_output_key/
-
-
-# giraffe
+# # forestelephants
 # python3 run_clustering_with_save.py \
-#     --config ./configs/giraffe/config_giraffe.yaml \
-#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/giraffe/gc_clustering/
+#     --config ./configs/forestelephants/config_manual_review_forestelephants.yaml \
+#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/forestelephants/manual_review_clustering/
+
+
+# # giraffe
+# python3 run_clustering_with_save.py \
+#     --config ./configs/giraffe/config_manual_review_giraffe.yaml \
+#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/giraffe/manual_review_clustering/
 
 # # lion
 # python3 run_clustering_with_save.py \
-#     --config ./configs/lion/config_lion.yaml \
-#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/lion/gc_clustering/
+#     --config ./configs/lion/config_manual_review_lion.yaml \
+#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/lion/manual_review_clustering/
 
 # sperm whale
 # python3 run_clustering_with_save.py \
-#     --config ./configs/spermwhale/config_spermwhale.yaml \
-#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/spermwhale/gc_clustering/
-#
+#     --config ./configs/spermwhale/config_manual_review_spermwhale.yaml \
+#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/spermwhale/manual_review_clustering/
 
-# plainszebra
+
+# plains zebra
 # python3 run_clustering_with_save.py \
-#     --config ./configs/plainszebra/config_plainszebra.yaml \
-#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/spermwhplainszebra/gc_clustering/
+#     --config ./configs/plainszebra/config_manual_review_plainszebra.yaml \
+#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/plainszebra/manual_review_clustering/
 
 # whaleshark
-# python3 run_clustering_with_save.py \
-#     --config ./configs/whaleshark/config_whaleshark.yaml \
-#     --save_dir /fs/ess/PAS2136/ggr_data/results/kate/whaleshark/gc_clustering/
+python3 run_clustering_with_save.py \
+    --config ./configs/whaleshark/config_manual_review_whaleshark.yaml \
+    --save_dir /fs/ess/PAS2136/ggr_data/results/kate/whaleshark/manual_review_clustering/
