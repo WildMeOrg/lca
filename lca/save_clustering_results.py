@@ -134,7 +134,7 @@ def save_clustering_results(input_dir, anno_file, output_path, prefix, suffix,
         parts.append(field_str)
         if suffix:
             parts.append(suffix)
-        output_filename = '_'.join(parts) + '.json' if parts else 'output.json'
+        output_filename = '_'.join(parts) + '.json' if parts else 'lca_annots.json'
     else:
         # Build filename with optional prefix and suffix
         parts = []
@@ -267,7 +267,7 @@ def combine_field_separated_results(base_path, anno_file, output_path, prefix, s
     if parts:
         output_filename = '_'.join(parts) + '.json'
     else:
-        output_filename = 'output.json'
+        output_filename = 'lca_annots.json'
 
     output_path_full = os.path.join(output_path, output_filename)
 
