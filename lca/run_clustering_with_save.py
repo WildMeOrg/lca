@@ -8,10 +8,12 @@ Supports any clustering algorithm (HDBSCAN, GC, LCA, etc.).
 import argparse
 import os
 import sys
-import subprocess
 import json
 import datetime
 from cluster_tools import percent_and_PR, build_node_to_cluster_mapping
+# Import clustering functions directly
+from run import run as run_clustering
+from save_clustering_results import save_clustering_results, process_field_separated_results
 
 
 def load_config(config_path):
@@ -118,7 +120,7 @@ def calculate_evaluation_metrics(est_clustering, est_node2uuid, gt_clustering, g
 
     # Calculate metrics using cluster_tools functions
     try:
-        frac_correct, precision, recall, per_size, non_equal, f1 = percent_and_PR(
+        frac_correct, precision, recall, per_size, _, f1 = percent_and_PR(
             aligned_est_clustering, est_n2c, aligned_gt_clustering, gt_n2c
         )
 
@@ -253,10 +255,6 @@ def main():
 
     parser.add_argument("--config", type=str, required=True,
                        help="Path to config file")
-    parser.add_argument("--output_prefix", type=str, default="clustering",
-                       help="Output filename prefix (default: clustering)")
-    parser.add_argument("--output_suffix", type=str, default="results",
-                       help="Output filename suffix (default: results)")
     parser.add_argument("--save_dir", type=str,
                        help="Directory to save formatted results (default: same as clustering output)")
     parser.add_argument("--interactive", "-i", action='store_true',
@@ -271,9 +269,23 @@ def main():
     algorithm_type = config.get('algorithm_type', 'unknown')
     print(f"Algorithm type: {algorithm_type}")
 
-    # Use algorithm-specific prefix if not specified
-    if args.output_prefix == "clustering" and algorithm_type != 'unknown':
-        args.output_prefix = algorithm_type
+    # Get output prefix and suffix from config only
+    output_config = config.get('output', {})
+
+    # Get prefix from config (or use algorithm_type as fallback)
+    if 'prefix' in output_config:
+        output_prefix = output_config['prefix']
+    # elif algorithm_type != 'unknown':
+    #     output_prefix = algorithm_type
+    else:
+        output_prefix = None
+
+    # Get suffix from config
+    output_suffix = output_config.get('suffix', None)
+
+    # Print info about prefix/suffix if they are set
+    if output_prefix or output_suffix:
+        print(f"Output naming: prefix='{output_prefix}', suffix='{output_suffix}'")
 
     # Get paths from config
     data_config = config.get('data', {})
@@ -306,16 +318,16 @@ def main():
     print(f"Step 1: Running {algorithm_type.upper()} clustering...")
     print("="*60)
 
-    cmd = ["python3", "run.py", "--config", args.config]
-    if args.interactive:
-        cmd.append("-i")
-
-    result = subprocess.run(cmd, capture_output=False, text=True)
-    if result.returncode != 0:
+    try:
+        # Call clustering function directly
+        run_clustering(config)
+        print(f"\n{algorithm_type.upper()} clustering completed successfully!")
+    except Exception as e:
         print(f"Error: {algorithm_type.upper()} clustering failed")
+        print(f"Error details: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
-
-    print(f"\n{algorithm_type.upper()} clustering completed successfully!")
 
     # Step 2: Save results in correct format
     print("\n" + "="*60)
@@ -324,47 +336,51 @@ def main():
 
     save_dir = args.save_dir or output_base
 
-    if separate_by_fields:
-        # Handle field-separated results
-        cmd = [
-            "python3", "save_clustering_results.py",
-            anno_file,
-            output_base,
-            save_dir,
-            "--prefix", args.output_prefix,
-            "--suffix", args.output_suffix,
-            "--uuid_key", uuid_key,
-            "--output_key", output_key,  # Pass output_key to save script
-            "--separate_by_fields"
-        ] + separate_by_fields
+    try:
+        if separate_by_fields:
+            # Handle field-separated results
+            print(f"Processing field-separated results...")
+            print(f"Using output key: '{output_key}'")
 
-        print(f"Processing field-separated results...")
-        print(f"Using output key: '{output_key}'")
-    else:
-        # Handle single result
-        cmd = [
-            "python3", "save_clustering_results.py",
-            anno_file,
-            output_base,
-            save_dir,
-            "--prefix", args.output_prefix,
-            "--suffix", args.output_suffix,
-            "--uuid_key", uuid_key,
-            "--output_key", output_key  # Pass output_key to save script
-        ]
+            # Call process_field_separated_results function directly
+            process_field_separated_results(
+                base_path=output_base,
+                anno_file=anno_file,
+                output_path=save_dir,
+                prefix=output_prefix,
+                suffix=output_suffix,
+                separate_by_fields=separate_by_fields,
+                uuid_key=uuid_key,
+                output_key=output_key
+            )
+        else:
+            # Handle single result
+            print(f"Processing single clustering result...")
+            print(f"Using output key: '{output_key}'")
 
-        print(f"Processing single clustering result...")
-        print(f"Using output key: '{output_key}'")
+            # Call save_clustering_results function directly
+            save_clustering_results(
+                input_dir=output_base,
+                anno_file=anno_file,
+                output_path=save_dir,
+                prefix=output_prefix,
+                suffix=output_suffix,
+                field_filters=None,
+                uuid_key=uuid_key,
+                output_key=output_key
+            )
 
-    result = subprocess.run(cmd, capture_output=False, text=True)
-    if result.returncode != 0:
+        print("\n" + "="*60)
+        print(f"{algorithm_type.upper()} clustering and formatting completed successfully!")
+        print(f"Results saved to: {save_dir}")
+        print("="*60)
+
+    except Exception as e:
         print("Error: Result formatting failed")
+        print(f"Error details: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
-
-    print("\n" + "="*60)
-    print(f"{algorithm_type.upper()} clustering and formatting completed successfully!")
-    print(f"Results saved to: {save_dir}")
-    print("="*60)
 
     # Step 3: Calculate evaluation metrics (always run if ground truth available)
     if config_log_file and name_keys:
