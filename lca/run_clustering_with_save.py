@@ -6,12 +6,14 @@ Supports any clustering algorithm (HDBSCAN, GC, LCA, etc.).
 """
 
 import argparse
+import logging
 import os
 import sys
 import json
 import datetime
 from cluster_tools import percent_and_PR, build_node_to_cluster_mapping
 # Import clustering functions directly
+from init_logger import init_logger
 from run import main as run_clustering
 from save_clustering_results import save_clustering_results, combine_field_separated_results
 
@@ -143,18 +145,24 @@ def calculate_evaluation_metrics(est_clustering, est_node2uuid, gt_clustering, g
             'frac_correct': 0.0
         }
 
+logger = logging.getLogger("lca")
 
 def append_metrics_to_config_log(log_file, metrics_summary):
     """Append evaluation metrics to the config-specified log file."""
-    if log_file and os.path.exists(log_file):
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with open(log_file, 'a') as f:
-            f.write("\n" + "="*60 + "\n")
-            f.write(f"CLUSTERING EVALUATION METRICS - {timestamp}\n")
-            f.write("="*60 + "\n")
-            f.write(metrics_summary)
-            f.write("="*60 + "\n")
-
+    
+    # if log_file and os.path.exists(log_file):
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # with open(log_file, 'a') as f:
+            # f.write("\n" + "="*60 + "\n")
+            # f.write(f"CLUSTERING EVALUATION METRICS - {timestamp}\n")
+            # f.write("="*60 + "\n")
+            # f.write(metrics_summary)
+            # f.write("="*60 + "\n")
+    logger.info("\n" + "="*60 + "\n")
+    logger.info(f"CLUSTERING EVALUATION METRICS - {timestamp}\n")
+    logger.info("="*60 + "\n")
+    logger.info("\n" + metrics_summary)
+    logger.info("="*60 + "\n")
 
 def evaluate_field_separated_results(output_base, anno_file, config_log_file,
                                     separate_by_fields, uuid_key, name_keys=None):
@@ -249,6 +257,7 @@ def evaluate_field_separated_results(output_base, anno_file, config_log_file,
 
 
 def main():
+    init_logger()
     parser = argparse.ArgumentParser(
         description="Run clustering algorithm and save results in the correct format"
     )
@@ -318,16 +327,9 @@ def main():
     print(f"Step 1: Running {algorithm_type.upper()} clustering...")
     print("="*60)
 
-    try:
-        # Call clustering function directly
-        run_clustering(config)
-        print(f"\n{algorithm_type.upper()} clustering completed successfully!")
-    except Exception as e:
-        print(f"Error: {algorithm_type.upper()} clustering failed")
-        print(f"Error details: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    run_clustering(config)
+    print(f"\n{algorithm_type.upper()} clustering completed successfully!")
+
 
     # Step 2: Save results in correct format
     print("\n" + "="*60)
