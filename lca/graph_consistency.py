@@ -108,34 +108,38 @@ class GraphConsistencyAlgorithm(object):
         clustering, node2cid, G = self.get_clustering()
         self.cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, self.num_human_reviews, G)
 
+    def densify_component(self, subG):
+        max_edges = self.config["max_densify_edges"]
+        logger = logging.getLogger('lca')
+        
+        missing_edges = []
+        nodes = list(subG.nodes())
+        
+        for i in range(len(nodes)):
+            for j in range(i + 1, len(nodes)):
+                n0, n1 = nodes[i], nodes[j]
+                if not self.G.has_edge(n0, n1):
+                    missing_edges.append((n0, n1))
+        if len(subG.edges()) + len(missing_edges) > max_edges:
+            # Sample edges instead of full densification
+            sample_size = max(0, max_edges - len(subG.edges()))
+            logger.info(f"Sampling {sample_size}/{len(missing_edges)} edges for densification of CC with {len(subG.edges())} edges")
+            missing_edges = random.sample(missing_edges, sample_size)
+            
+        # Classify missing edges using next available classifier for each
+        new_edges = []
+        for n0, n1 in missing_edges:
+            edge = self.classifier_manager.classify_edge(n0, n1)
+            new_edges.append(edge)
+
+        self.add_new_edges(new_edges)
+        return self.G.subgraph(subG.nodes())
+
     def densify_iPCCs(self, iPCCs):
         """Add missing edges using classifier system."""
         updated_iPCCs = []
-        max_edges = self.config["max_densify_edges"]
-        logger = logging.getLogger('lca')
         for subG in iPCCs:
-            missing_edges = []
-            nodes = list(subG.nodes())
-            
-            for i in range(len(nodes)):
-                for j in range(i + 1, len(nodes)):
-                    n0, n1 = nodes[i], nodes[j]
-                    if not self.G.has_edge(n0, n1):
-                        missing_edges.append((n0, n1))
-            if len(subG.edges()) + len(missing_edges) > max_edges:
-                # Sample edges instead of full densification
-                sample_size = max(0, max_edges - len(subG.edges()))
-                logger.info(f"Sampling {sample_size}/{len(missing_edges)} edges for densification of CC with {len(subG.edges())} edges")
-                missing_edges = random.sample(missing_edges, sample_size)
-                
-            # Classify missing edges using next available classifier for each
-            new_edges = []
-            for n0, n1 in missing_edges:
-                edge = self.classifier_manager.classify_edge(n0, n1)
-                new_edges.append(edge)
-
-            self.add_new_edges(new_edges)
-            updated_iPCCs.append(self.G.subgraph(subG.nodes()))
+            updated_iPCCs.append(self.densify_component(subG))
             
         return updated_iPCCs
 
@@ -297,7 +301,7 @@ class GraphConsistencyAlgorithm(object):
                         old_edge["deactivator"] = None
                     
                 
-                logger.info(f"Updating existing edge ({n0}, {n1})")
+                logger.info(f"Updating existing edge ({n0}, {n1}) with label {label}, confidence {confidence}, score {score}, ranker {ranker_name}")
                 self.G.edges[n0, n1]["label"] = label
                 self.G.edges[n0, n1]["confidence"] = confidence
                 self.G.edges[n0, n1]["ranker"] = ranker_name
@@ -352,6 +356,7 @@ class GraphConsistencyAlgorithm(object):
             # logger.info(f"Nodes in component: {len(component)}")
             subG = self.G.subgraph(component)  # Get all edges within the component
             maxsize = max(maxsize, len(subG.nodes()))
+            # subG = self.densify_component(subG)
             # if len(component) > self.config["densify_threshold"]:
             #     u, v, _ = min([(u,v, d["confidence"]) for u, v, d in subG.edges(data=True) if d["label"]=="positive"], key=lambda edge: edge[2])
             #     self.G[u][v]["label"] = "negative"
