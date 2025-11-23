@@ -37,6 +37,7 @@ from robust_gmm_threshold import find_threshold as robust_gmm_find_threshold
 from hdbscan_algorithm import HDBSCANAlgorithm
 from manual_review_algorithm import ManualReviewAlgorithm
 from thresholded_review_algorithm import ThresholdedReviewAlgorithm
+from hdbscan_embeddings import HDBSCANEmbeddings
 
 logger = logging.getLogger('lca')
 
@@ -53,7 +54,7 @@ def parse_verifier_names(verifier_names):
     """
     parsed_verifiers = []
     
-    meta_names = ['metadata', 'tracking', 'negative_only']
+    meta_names = ['metadata', 'tracking', 'negative_only', 'hdbscan']
 
     i = 0
     while i < len(verifier_names):
@@ -165,11 +166,12 @@ def prepare_common(config):
         'random': lazy(lambda: RandomEmbeddings()),
         'lightglue': lazy(lambda: LightglueEmbeddings(node2uuid, "lightglue_scores_superpoint.pickle")) # TODO: get the correct path
     }
-    
+    embeddings_dict['miewid1'] = embeddings_dict['miewid']
     # Create unfiltered embeddings for threshold calculation (when needed)
     unfiltered_embeddings_dict = {
         'miewid': lazy(lambda: Embeddings(embeddings, all_node2uuid, distance_power=distance_power, print_func=logger.info))
     }
+    unfiltered_embeddings_dict['miewid1'] = unfiltered_embeddings_dict['miewid']
     
     # 4. Setup human reviewer based on augmentation names (with backwards compatibility)
     logger.info("Setting up human reviewer...")
@@ -181,9 +183,11 @@ def prepare_common(config):
     
     prob_human_correct = edge_weights.get('prob_human_correct', 0.98)
     # aug_names = edge_weights.get('augmentation_names', 'miewid human').split()
+    verifier_name = algorithm_config.get('verifier_name', 'miewid')
+    
     verifier_names_str = edge_weights.get('verifier_names', edge_weights.get('augmentation_names', 'miewid human'))
     aug_names = verifier_names_str.split() if isinstance(verifier_names_str, str) else verifier_names_str
-    parsed_verifiers = parse_verifier_names(aug_names)
+    parsed_verifiers = parse_verifier_names(aug_names + [verifier_name])
 
     # Backwards compatibility: handle old "human" + simulate_human flag
     simulate_human = algorithm_config.get('simulate_human', True)
@@ -200,6 +204,7 @@ def prepare_common(config):
             ui_db_path = data_params.get('ui_db_path')
             if ui_db_path:
                 from human_db import human_db
+                logger.info(f"ui_human - using UI database for human reviews at {ui_db_path}")
                 human_reviewer = human_db(ui_db_path, filtered_df, node2uuid)
             else:
                 logger.warning("ui_human specified but no ui_db_path provided, falling back to simulated")
@@ -229,7 +234,6 @@ def prepare_common(config):
         human_reviewer = lambda _: ([], True)
     
     # 5. Setup synthetic embeddings if needed
-    verifier_name = algorithm_config.get('verifier_name', 'miewid')
     
     if verifier_name == 'synthetic' or 'synthetic' in aug_names:
         logger.info("Setting up synthetic embeddings...")
@@ -261,6 +265,12 @@ def prepare_common(config):
             base_embeddings = embeddings_dict[base_name]()
             embeddings_dict[f'negative_only({base_name})'] = lazy(lambda: NegativeOnlyEmbeddings.from_embeddings(
                 base_embeddings, df, node2uuid, id_key, class_key='tracking_id', multiplier=1)
+            )
+        elif name == 'hdbscan':
+            # Create tracking ID wrapper
+            base_embeddings = embeddings_dict[base_name]()
+            embeddings_dict[f'hdbscan({base_name})'] = lazy(lambda: HDBSCANEmbeddings(
+                base_embeddings.embeddings, node2uuid, print_func=logger.info)
             )
 
     logger.info("Computing and logging verifier performance statistics...")
