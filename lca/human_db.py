@@ -1,6 +1,9 @@
+import logging
 import sqlite3
 import os
 from pathlib import Path
+
+logger = logging.get("lca")
 
 class human_db(object):
     def __init__(self, db_path, data_df, node2uuid, id_key='uuid'):
@@ -96,20 +99,34 @@ class human_db(object):
         query: iterable of (n0, n1, score)
         returns: (reviews, False) where reviews is [(node0, node1, is_correct), ...]
         """
+        logger.info(f"__call__ invoked with {len(list(query)) if hasattr(query, '__len__') else 'unknown number of'} query pairs")
+        query = list(query)  # Convert to list to allow multiple iterations
+        logger.debug(f"Query contains {len(query)} pairs")
+
         if not os.path.exists(self.db_path):
+            logger.warning(f"Database does not exist at {self.db_path}")
             print("DB doesn't exist")
+            logger.info(f"Initializing database at {self.db_path}")
             self.init_db(self.db_path)
             if not os.path.exists(self.db_path):
+                logger.error(f"Failed to create database at {self.db_path}")
                 raise RuntimeError(f"Failed to create DB at {self.db_path}")
+            logger.info(f"Database successfully created at {self.db_path}")
+        else:
+            logger.debug(f"Database exists at {self.db_path}")
 
         reviews = []
+        logger.info(f"Connecting to database at {self.db_path}")
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
 
             # Prepare inserts (always with score)
+            logger.debug("Converting query pairs to database format")
             db_query = [self.convert_query(n0, n1, score) for (n0, n1, score) in query]
+            logger.info(f"Converted {len(db_query)} query pairs")
 
             if db_query:
+                logger.debug(f"Inserting {len(db_query)} pairs into image_verification table")
                 cursor.executemany("""
                     INSERT OR IGNORE INTO image_verification
                     (id, uuid1, image1_path, bbox1, cluster1,
@@ -118,41 +135,56 @@ class human_db(object):
                 """, db_query)
 
             inserted_count = cursor.rowcount if db_query else 0
+            logger.info(f"Inserted {inserted_count} new pairs for checking")
             print(f"Sent {inserted_count} new pairs for checking.")
 
             # Fetch checked decisions
+            logger.debug("Fetching checked decisions from database")
             cursor.execute("""
                 SELECT id, uuid1, uuid2, decision FROM image_verification
                 WHERE status = 'checked'
             """)
             checked_results = cursor.fetchall()
+            logger.info(f"Found {len(checked_results)} checked results")
+
             checked_results = [(r1, uuid1, uuid2, decision) for (r1, uuid1, uuid2, decision) in checked_results if uuid1 in self.uuid2node and uuid2 in self.uuid2node]
-            
+            logger.debug(f"Filtered to {len(checked_results)} checked results with valid UUIDs")
+
             # Check if any query pairs are already 'sent'
             sent_results = []
             if db_query:
                 query_ids = [row[0] for row in db_query]
+                logger.debug(f"Checking for {len(query_ids)} query pairs that are already sent")
                 placeholders = ','.join('?' * len(query_ids))
                 cursor.execute(f"""
                     SELECT id, uuid1, uuid2, decision FROM image_verification
                     WHERE status = 'sent' AND id IN ({placeholders})
                 """, query_ids)
                 sent_results = cursor.fetchall()
+                logger.info(f"Found {len(sent_results)} results already marked as sent")
+
                 sent_results = [(r1, uuid1, uuid2, decision) for (r1, uuid1, uuid2, decision) in sent_results if uuid1 in self.uuid2node and uuid2 in self.uuid2node]
-            
+                logger.debug(f"Filtered to {len(sent_results)} sent results with valid UUIDs")
+
             # Update checked to sent
             if checked_results:
+                logger.info(f"Updating {len(checked_results)} checked results to sent status")
                 cursor.executemany(
                     "UPDATE image_verification SET status='sent' WHERE id=?",
                     [(res[0],) for res in checked_results]
                 )
-            
+                logger.debug(f"Successfully updated status for {len(checked_results)} results")
+
             # Merge results
             result = checked_results + sent_results
-            
+            logger.info(f"Total merged results: {len(result)} ({len(checked_results)} checked + {len(sent_results)} sent)")
+
             reviews = [
                 (self.uuid2node[uuid1], self.uuid2node[uuid2], decision == 'correct')
                 for (_, uuid1, uuid2, decision) in result
             ]
+            logger.info(f"Prepared {len(reviews)} reviews for return")
+            logger.debug(f"Reviews breakdown: {sum(1 for r in reviews if r[2])} correct, {sum(1 for r in reviews if not r[2])} incorrect")
 
+        logger.info(f"__call__ completed, returning {len(reviews)} reviews")
         return reviews, False
