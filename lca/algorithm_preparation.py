@@ -739,6 +739,7 @@ def prepare_gc(common_data, config):
                 # )
                 threshold = robust_gmm_find_threshold(
                     np.array(thresh_embeddings.get_all_scores()), 
+                    entropy_alpha=1-threshold_fraction,
                     verbose=True, 
                     print_func=logger.info,
                     plot_path=robust_plot_path

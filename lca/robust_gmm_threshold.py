@@ -134,7 +134,7 @@ def _plot_threshold(scores, pi, mu, sigma2, threshold, plot_path):
     plt.close()
 
 
-def find_threshold(scores, entropy_alpha=0.9, n_init=1, verbose=False, print_func=print, plot_path=None):
+def find_threshold(scores, entropy_alpha=0.85, n_init=1, verbose=False, print_func=print, plot_path=None):
     """
     Find optimal classification threshold from unlabeled scores.
 
