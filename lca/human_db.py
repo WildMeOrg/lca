@@ -3,7 +3,7 @@ import sqlite3
 import os
 from pathlib import Path
 
-logger = logging.get("lca")
+logger = logging.getLogger("lca")
 
 class human_db(object):
     def __init__(self, db_path, data_df, node2uuid, id_key='uuid'):
