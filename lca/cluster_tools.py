@@ -3,6 +3,8 @@
 import logging
 import math
 from collections import defaultdict
+import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 
 logger = logging.getLogger('lca')
@@ -491,6 +493,91 @@ def percent_and_PR(est, est_n2c, gt, gt_n2c):
     non_eq = get_nonequal_clustering(est, gt, gt_n2c)
     pr, rec, f1 = precision_recall(est, est_n2c, gt, gt_n2c)
     per_size = precision_recall_per_size(est, est_n2c, gt, gt_n2c)
-    lng = len(est) 
+    lng = len(est)
     lng = 1 if lng == 0 else lng
     return (num_eq / lng, pr, rec, per_size, non_eq, f1)
+
+
+def hungarian_cluster_matching(est, gt):
+    """
+    Match estimated clusters to ground truth clusters using the Hungarian algorithm
+    based on Jaccard similarity. This provides a "softer" evaluation metric that
+    doesn't require exact cluster matches.
+
+    Process:
+    1. Compute Jaccard similarity between each GT cluster and each estimated cluster
+    2. Run Hungarian algorithm to find optimal one-to-one assignment (maximizing Jaccard)
+    3. Exclude assignments where Jaccard = 0 (no overlap)
+    4. Compute TP, FP, FN from the matched node sets
+
+    Args:
+        est: Estimated clustering (dict: cluster_id -> set of nodes)
+        gt: Ground truth clustering (dict: cluster_id -> set of nodes)
+
+    Returns:
+        dict with keys: 'tp', 'fp', 'fn', 'precision', 'recall', 'f1',
+                       'num_matched_gt', 'num_matched_est', 'assignments'
+    """
+    # Convert to sets if needed (some callers pass lists)
+    gt_sets = {k: set(v) if not isinstance(v, set) else v for k, v in gt.items()}
+    est_sets = {k: set(v) if not isinstance(v, set) else v for k, v in est.items()}
+
+    gt_ids = list(gt_sets.keys())
+    est_ids = list(est_sets.keys())
+
+    n_gt = len(gt_ids)
+    n_est = len(est_ids)
+
+    if n_gt == 0 or n_est == 0:
+        # Edge case: empty clustering
+        total_gt_nodes = sum(len(c) for c in gt.values())
+        total_est_nodes = sum(len(c) for c in est.values())
+        return {
+            'tp': 0, 'fp': total_est_nodes, 'fn': total_gt_nodes,
+            'precision': 0, 'recall': 0, 'f1': 0,
+            'num_matched_gt': 0, 'num_matched_est': 0, 'assignments': []
+        }
+
+    # Build Jaccard similarity matrix
+    jaccard_matrix = np.zeros((n_gt, n_est))
+    for i, gt_id in enumerate(gt_ids):
+        for j, est_id in enumerate(est_ids):
+            jaccard_matrix[i, j] = intersection_over_union(gt_sets[gt_id], est_sets[est_id])
+
+    # Use negative Jaccard as cost for minimization
+    cost_matrix = -jaccard_matrix
+
+    # Run Hungarian algorithm
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+
+    # Filter out assignments with 0 Jaccard (no overlap)
+    valid_assignments = []
+    for gt_idx, est_idx in zip(row_ind, col_ind):
+        if jaccard_matrix[gt_idx, est_idx] > 0:
+            valid_assignments.append((gt_ids[gt_idx], est_ids[est_idx]))
+
+    # Calculate cluster-level TP, FP, FN from assignments
+    # TP = number of successfully matched cluster pairs
+    # FP = number of EST clusters that remained unmatched
+    # FN = number of GT clusters that remained unmatched
+
+    tp = len(valid_assignments)  # Number of matched cluster pairs
+    fn = n_gt - tp  # Unmatched GT clusters
+    fp = n_est - tp  # Unmatched EST clusters
+
+    # Compute precision, recall, F1 at cluster level
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+
+    return {
+        'tp': tp,
+        'fp': fp,
+        'fn': fn,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
+        'num_gt_clusters': n_gt,
+        'num_est_clusters': n_est,
+        'assignments': valid_assignments
+    }

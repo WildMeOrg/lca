@@ -98,15 +98,29 @@ class ClusterValidator(object):
         frac, prec, rec, per_size, non_equal_clustering, f1 = ct.percent_and_PR(
             clustering, node2cid, true_clustering, true_node2cid
         )
+
+        # Hungarian matching-based metrics (softer evaluation)
+        hungarian = ct.hungarian_cluster_matching(clustering, true_clustering)
+
         result = {
             'num human': num_human,
             'num clusters': len(clustering),
             'num true clusters': len(true_clustering),
+
+            # Hungarian matching metrics (cluster-level)
+            'Hungarian precision': hungarian['precision'],
+            'Hungarian recall': hungarian['recall'],
+            'Hungarian f1 score': hungarian['f1'],
+            # 'hungarian_tp': hungarian['tp'],
+            # 'hungarian_fp': hungarian['fp'],
+            # 'hungarian_fn': hungarian['fn'],
+
             'frac correct': frac,
             'precision': prec,
             'recall': rec,
-            'error_rate': 1- frac,
+            'error_rate': 1 - frac,
             'f1 score': f1,
+            
             # 'per size': per_size,
             'non equal': non_equal_clustering,
             # 'current clustering': clustering

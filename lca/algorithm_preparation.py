@@ -212,7 +212,7 @@ def prepare_common(config):
             break
         elif aug_name == 'no_human':
             logger.info("no_human - running without human reviews")
-            human_reviewer = lambda _: ([], True)
+            human_reviewer = lambda _: ([], False)
             break
     
     # Backwards compatibility: handle old "human" in aug_names (from existing configs)
@@ -357,6 +357,7 @@ def prepare_common(config):
     target_edges = algorithm_params.get('target_edges', 0)
     target_proportion = algorithm_params.get('target_proportion', None)
     initial_topk = algorithm_params.get('initial_topk', 10)
+    initial_botk = algorithm_params.get('initial_botk', 0)
 
 
     # 9. Return common data
@@ -377,6 +378,7 @@ def prepare_common(config):
         'output_path': output_path,
         'target_edges': target_edges,
         'initial_topk': initial_topk,
+        'initial_botk': initial_botk,
         'target_proportion': target_proportion
     }
 
@@ -677,7 +679,7 @@ def prepare_gc(common_data, config):
     logger.info(f"THETA {gc_config['theta']}")
     print(f"THETA {gc_config['theta']}")
     gc_config['prob_human_correct'] = common_data.get('prob_human_correct', 0.98)
-    gc_config['max_densify_edges'] = gc_config.get('max_densify_edges', 200)
+    gc_config['max_densify_edges'] = gc_config.get('max_densify_edges', 2000)  # Increased for aggressive edge discovery
 
     # Backwards compatibility: check for both verifier_names and augmentation_names
     verifier_names_str = edge_weights.get('verifier_names', edge_weights.get('augmentation_names', 'miewid human'))
@@ -790,12 +792,20 @@ def prepare_gc(common_data, config):
         verifier_names=verifier_names,
         classifier_units=classifier_units
     )
-    
+
+    # Store classifier threshold in common_data for use in initialization
+    verifier_name = common_data['verifier_name']
+    if verifier_name in classifier_units:
+        embeddings, classifier = classifier_units[verifier_name]
+        if hasattr(classifier, 'threshold'):
+            common_data['classifier_threshold'] = classifier.threshold
+            logger.info(f"Stored classifier threshold {classifier.threshold} for {verifier_name}")
+
     # Create GC instance
-    gc_instance = GraphConsistencyAlgorithm(gc_config, 
-                                            classifier_manager=classifier_manager, 
+    gc_instance = GraphConsistencyAlgorithm(gc_config,
+                                            classifier_manager=classifier_manager,
                                             cluster_validator=common_data['cluster_validator'])
-    
+
     return gc_instance
 
 

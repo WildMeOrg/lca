@@ -42,8 +42,89 @@ class HDBSCANEmbeddings(object):
         n_noise = list(self.labels).count(-1)
         self.print_func(f"HDBSCAN found {n_clusters} clusters, {n_noise} noise points")
 
-        # Precompute soft cluster memberships for all points
+        # Precompute mutual reachability distances from HDBSCAN
+        self._precompute_mutual_reachability()
+
+        # Also precompute soft cluster memberships for backward compatibility
         self._precompute_memberships()
+
+    def _precompute_mutual_reachability(self):
+        """Precompute mutual reachability distance matrix from HDBSCAN's internal graph."""
+        from sklearn.neighbors import NearestNeighbors
+
+        n = len(self.embeddings)
+        self.mutual_reachability_matrix = np.full((n, n), np.inf)
+
+        # Compute core distances: distance to k-th nearest neighbor
+        # where k = min_cluster_size (this is the standard HDBSCAN approach)
+        k = self.min_cluster_size
+        self.print_func(f"Computing core distances using k={k} nearest neighbors...")
+
+        nbrs = NearestNeighbors(n_neighbors=k+1, metric=self.metric).fit(self.embeddings)
+        distances, indices = nbrs.kneighbors(self.embeddings)
+        # Core distance is the distance to the k-th nearest neighbor (index k, since index 0 is the point itself)
+        core_distances = distances[:, k]
+
+        self.print_func(f"Core distances range: [{np.min(core_distances):.4f}, {np.max(core_distances):.4f}]")
+
+        # Compute mutual reachability for all pairs in the same cluster
+        # Mutual reachability distance = max(core_distance[i], core_distance[j], distance[i,j])
+        self.print_func("Computing mutual reachability distances for all cluster pairs...")
+        pair_count = 0
+        for i in range(n):
+            for j in range(i+1, n):
+                # Only compute for points in the same cluster (not noise)
+                if self.labels[i] == self.labels[j] and self.labels[i] != -1:
+                    # Compute raw distance
+                    if self.metric == 'euclidean':
+                        raw_dist = np.linalg.norm(self.embeddings[i] - self.embeddings[j])
+                    elif self.metric == 'cosine':
+                        raw_dist = cosine(self.embeddings[i], self.embeddings[j])
+                    else:
+                        # Use scipy's distance for other metrics
+                        from scipy.spatial.distance import pdist
+                        raw_dist = pdist([self.embeddings[i], self.embeddings[j]], metric=self.metric)[0]
+
+                    # Mutual reachability distance
+                    mr_dist = max(core_distances[i], core_distances[j], raw_dist)
+                    self.mutual_reachability_matrix[i, j] = mr_dist
+                    self.mutual_reachability_matrix[j, i] = mr_dist
+                    pair_count += 1
+
+        self.print_func(f"Computed mutual reachability for {pair_count} pairs in same clusters")
+
+        # Count finite edges (excluding diagonal)
+        finite_count = np.sum(np.isfinite(self.mutual_reachability_matrix)) - n  # subtract diagonal
+        self.print_func(f"Mutual reachability matrix: {finite_count/2} finite edges")
+
+        # Set diagonal to 0
+        np.fill_diagonal(self.mutual_reachability_matrix, 0)
+
+        # Normalize to [0, 1] range: convert distances to similarities
+        # Finite distances become scores, infinite distances become 0 (no connection)
+        # Exclude diagonal when finding max
+        finite_mask = np.isfinite(self.mutual_reachability_matrix)
+        off_diag_mask = ~np.eye(n, dtype=bool)
+        finite_off_diag = finite_mask & off_diag_mask
+
+        if np.any(finite_off_diag):
+            max_finite_dist = np.max(self.mutual_reachability_matrix[finite_off_diag])
+            min_finite_dist = np.min(self.mutual_reachability_matrix[finite_off_diag])
+            self.max_reachability_dist = max_finite_dist if max_finite_dist > 0 else 1.0
+            self.print_func(f"Mutual reachability distances range: [{min_finite_dist:.4f}, {max_finite_dist:.4f}]")
+        else:
+            self.max_reachability_dist = 1.0
+            self.print_func("Warning: No finite off-diagonal mutual reachability distances found!")
+
+        # Convert to similarity scores: high distance = low score
+        # Score = 1 - (distance / max_distance) for finite distances
+        # Score = 0 for infinite distances (not connected)
+        self.similarity_matrix = np.zeros_like(self.mutual_reachability_matrix)
+        self.similarity_matrix[finite_mask] = 1.0 - (self.mutual_reachability_matrix[finite_mask] / self.max_reachability_dist)
+        np.fill_diagonal(self.similarity_matrix, 1.0)  # Self-similarity is 1.0
+
+        non_zero_scores = np.sum((self.similarity_matrix > 0) & off_diag_mask)
+        self.print_func(f"Similarity scores: {non_zero_scores/2} non-zero scores, range: [{np.min(self.similarity_matrix[off_diag_mask]):.4f}, {np.max(self.similarity_matrix):.4f}]")
 
     def _precompute_memberships(self):
         """Precompute membership vectors for all points."""
@@ -71,8 +152,8 @@ class HDBSCANEmbeddings(object):
                 self.membership_vectors.append(membership)
 
     def _reduce_func(self, distmat, start):
-        """Convert distance matrix to HDBSCAN probability scores."""
-        # Convert distances to membership probability scores
+        """Extract similarity scores from precomputed matrix (range [0, 1])."""
+        # Use precomputed similarity matrix (already in [0, 1] range)
         scores = np.zeros_like(distmat)
 
         for i in range(distmat.shape[0]):
@@ -80,17 +161,17 @@ class HDBSCANEmbeddings(object):
                 node_i = i + start
                 node_j = j
 
-                if node_i < len(self.membership_vectors) and node_j < len(self.membership_vectors):
-                    # Calculate membership overlap
-                    overlap = np.dot(self.membership_vectors[node_i], self.membership_vectors[node_j])
-                    scores[i, j] = 1 - overlap  # Convert to distance (0 = same cluster, 1 = different)
+                if node_i < self.similarity_matrix.shape[0] and node_j < self.similarity_matrix.shape[1]:
+                    # Use similarity score (1 = connected, 0 = not connected)
+                    # Convert to distance: distance = 1 - similarity
+                    scores[i, j] = 1.0 - self.similarity_matrix[node_i, node_j]
                 else:
-                    scores[i, j] = 1.0  # Maximum distance for out-of-bounds
+                    scores[i, j] = 1.0  # Maximum distance for out of bounds
 
-        # Set diagonal to infinity
+        # Set diagonal to maximum distance (to avoid self-matching)
         rng = np.arange(min(scores.shape[0], scores.shape[1] - start))
         if len(rng) > 0 and start < scores.shape[1]:
-            scores[rng, rng + start] = np.inf
+            scores[rng, rng + start] = 1.0
 
         return scores
 
@@ -114,23 +195,41 @@ class HDBSCANEmbeddings(object):
         return list(chunks), ids
 
     def get_score(self, id1, id2):
-        """Get HDBSCAN membership probability score between two nodes."""
+        """
+        Get HDBSCAN similarity score between two nodes (range [0, 1]).
+
+        Score interpretation:
+        - score > 0: Points have a finite mutual reachability distance (connected by HDBSCAN)
+        - score = 0: Points have infinite mutual reachability distance (not connected by HDBSCAN)
+
+        Higher scores indicate stronger connections (smaller mutual reachability distances).
+        """
         idx1 = self.ids.index(id1)
         idx2 = self.ids.index(id2)
 
-        if idx1 < len(self.membership_vectors) and idx2 < len(self.membership_vectors):
-            # Calculate membership overlap as score
-            overlap = np.dot(self.membership_vectors[idx1], self.membership_vectors[idx2])
-            return float(overlap)
+        # Use precomputed similarity matrix based on mutual reachability
+        if idx1 < self.similarity_matrix.shape[0] and idx2 < self.similarity_matrix.shape[1]:
+            return float(self.similarity_matrix[idx1, idx2])
 
-        # Check if same cluster (hard clustering fallback)
-        if self.labels[idx1] == self.labels[idx2] and self.labels[idx1] != -1:
-            return 1.0
-        else:
-            return 0.0
+        # Fallback: not connected
+        return 0.0
+
+    def is_connected(self, id1, id2):
+        """
+        Check if two nodes are connected according to HDBSCAN.
+        Returns True if they have a finite mutual reachability distance (score > 0).
+        """
+        idx1 = self.ids.index(id1)
+        idx2 = self.ids.index(id2)
+
+        # Check if there's a finite mutual reachability distance
+        if idx1 < self.mutual_reachability_matrix.shape[0] and idx2 < self.mutual_reachability_matrix.shape[1]:
+            return np.isfinite(self.mutual_reachability_matrix[idx1, idx2])
+
+        return False
 
     def get_embeddings_score(self, embedding1, embedding2):
-        """Get score between two embeddings (requires finding their indices)."""
+        """Get score between two embeddings (requires finding their indices). Range [0, 1]."""
         # This is less efficient - try to use get_score with IDs instead
         idx1 = None
         idx2 = None
@@ -144,8 +243,7 @@ class HDBSCANEmbeddings(object):
                 break
 
         if idx1 is not None and idx2 is not None:
-            overlap = np.dot(self.membership_vectors[idx1], self.membership_vectors[idx2])
-            return float(overlap)
+            return float(self.similarity_matrix[idx1, idx2])
 
         return 0.0
 
@@ -182,10 +280,11 @@ class HDBSCANEmbeddings(object):
         return top1, top3, top5, top10
 
     def get_all_scores(self):
-        """Get all pairwise HDBSCAN membership probability scores."""
+        """Get all pairwise HDBSCAN similarity scores (range [0, 1])."""
         chunks, ids = self._calculate_distance_matrix()
         distmat = np.concatenate(list(chunks), axis=0)
         all_inds_y, all_inds_x = np.triu_indices(n=distmat.shape[0], m=distmat.shape[1], k=1)
+        # distmat contains distances (1 - similarity), so convert back to similarity
         scores = [1-distmat[y, x] for y,x in zip(all_inds_y, all_inds_x)]
         return scores
 
@@ -254,4 +353,5 @@ class HDBSCANEmbeddings(object):
 
         self.print_func(f"Calculated distances: {time.time() - start_time:.6f} seconds")
         self.print_func(f"{len(set(result))}")
+        self.print_func(result[:50])
         return set(result)

@@ -125,8 +125,8 @@ class ClassifierManager:
             next_classifier = self.get_next_classifier(current_classifier)
             if next_classifier == 'human':
                 # Exhausted all algorithmic classifiers
-                if current_classifier is not 'human':
-                    logger.info(f"Edge ({n0}, {n1}) exhausted all algorithmic classifiers, requesting human review")
+                if current_classifier != 'human':
+                    # logger.info(f"Edge ({n0}, {n1}) exhausted all algorithmic classifiers, requesting human review")
                     embeddings, classifier = self.classifier_units[current_classifier]
                     score = embeddings.get_score(n0, n1)
                 else:

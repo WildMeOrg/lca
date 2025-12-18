@@ -19,18 +19,48 @@ logger = logging.getLogger('lca')
 
 
 def get_initial_edges(common_data, config):
-    """Get initial edges in unified format."""
+    """Get initial edges in unified format.
+
+    Supports threshold-based initialization where edges are selected based on:
+    - top-k neighbors (existing)
+    - random proportion (existing)
+    - certain positives: score > classifier_threshold + upper_margin
+    - certain negatives: score < classifier_threshold - lower_margin
+    """
     verifier_name = common_data['verifier_name']
     verifier_embeddings = common_data['embeddings_dict'][verifier_name]
-    
-    # Get algorithm parameters (with backwards compatibility)
-    # New: algorithm section, Old: no specific location (use defaults)
-    
-    
-    # Get raw edges
-    raw_edges = list(verifier_embeddings.get_edges(target_edges=common_data['target_edges'], 
-                                                   topk=common_data['initial_topk'],
-                                                   target_proportion=common_data['target_proportion']))
+
+    # Get algorithm parameters
+    algorithm_params = config.get('algorithm', {})
+
+    # Compute thresholds from classifier threshold if available
+    classifier_threshold = common_data.get('classifier_threshold')
+    lower_threshold = None
+    upper_threshold = None
+
+    if classifier_threshold is not None:
+        # Get margins from config (can be symmetric or asymmetric)
+        threshold_margin = algorithm_params.get('threshold_margin', None)
+        lower_margin = algorithm_params.get('lower_threshold_margin', threshold_margin)
+        upper_margin = algorithm_params.get('upper_threshold_margin', threshold_margin)
+
+        if lower_margin is not None:
+            lower_threshold = classifier_threshold - lower_margin
+            logger.info(f"Using lower_threshold={lower_threshold:.4f} (classifier={classifier_threshold:.4f} - margin={lower_margin})")
+
+        if upper_margin is not None:
+            upper_threshold = classifier_threshold + upper_margin
+            logger.info(f"Using upper_threshold={upper_threshold:.4f} (classifier={classifier_threshold:.4f} + margin={upper_margin})")
+
+    # Get raw edges with threshold-based selection
+    raw_edges = list(verifier_embeddings.get_edges(
+        target_edges=common_data['target_edges'],
+        topk=common_data['initial_topk'],
+        botk=common_data.get('initial_botk', 0),
+        target_proportion=common_data['target_proportion'],
+        lower_threshold=lower_threshold,
+        upper_threshold=upper_threshold
+    ))
     raw_edges = [(*n, verifier_name) for n in raw_edges]
 
     return raw_edges
@@ -103,15 +133,33 @@ def run(config):
 
         # print("requested", requested_edges[0])
         
-        # Main loop - algorithm handles all its own logic
-        while requested_edges and not algorithm.is_finished():
-            human_responses, quit = get_human_responses(requested_edges, common_data)
-            
-            if quit:
-                logger.info("Human reviewer requested to quit")
-                break
-                
-            requested_edges = algorithm.step(human_responses)
+        # Main loop - run until convergence or max iterations
+        max_outer_iterations = config.get('algorithm', {}).get('max_outer_iterations', 100)
+        outer_iteration = 0
+
+        while not algorithm.is_finished() and outer_iteration < max_outer_iterations:
+            logger.info(f"Outer iteration {outer_iteration}")
+            outer_iteration += 1
+
+            if requested_edges:
+                # Get human responses for edges that need review
+                human_responses, quit = get_human_responses(requested_edges, common_data)
+
+                if quit:
+                    logger.info("Human reviewer requested to quit")
+                    break
+
+                requested_edges = algorithm.step(human_responses)
+            else:
+                # No edges need human review, but algorithm not finished
+                # Continue with empty step to allow further progress
+                logger.info("No edges for human review, continuing algorithm")
+                requested_edges = algorithm.step([])
+
+        if outer_iteration >= max_outer_iterations:
+            logger.warning(f"Reached max outer iterations ({max_outer_iterations})")
+        else:
+            logger.info(f"Algorithm converged after {outer_iteration} outer iterations")
         
         logger.info("Algorithm execution completed")
         algorithm.show_stats()

@@ -13,6 +13,7 @@ import time
 from collections import defaultdict
 import networkx as nx
 from tools import write_json
+import cluster_tools as ct
 import os
 
 logger = logging.getLogger('lca')
@@ -105,7 +106,7 @@ class ManualReviewAlgorithm:
         # Use a higher target to ensure we get enough edges after filtering
         all_edges = self.embeddings.get_edges(
             topk=self.topk,
-            target_edges=expected_edges * 2,  # Get more than we need
+            target_edges=0,#expected_edges * 2,  # Get more than we need
             target_proportion=None
         )
 
@@ -303,6 +304,9 @@ class ManualReviewAlgorithm:
         num_pred_clusters = len(pred_clusters)
         fraction_correct = num_exact_matches / num_pred_clusters if num_pred_clusters > 0 else 0
 
+        # Compute Hungarian matching metrics (cluster-level)
+        hungarian = ct.hungarian_cluster_matching(pred_clusters, gt_clusters)
+
         # Log metrics
         logger.info(f"\nEvaluation Metrics - FULL DATASET (after {self.stats['num_reviews']} reviews):")
         logger.info(f"  F1 Score: {f1:.4f}")
@@ -310,6 +314,10 @@ class ManualReviewAlgorithm:
         logger.info(f"  Recall: {recall:.4f}")
         logger.info(f"  Fraction Correct: {fraction_correct:.4f} ({num_exact_matches}/{num_pred_clusters} exact cluster matches)")
         logger.info(f"  Pairwise TP={tp}, FP={fp}, FN={fn}")
+        logger.info(f"  Hungarian F1 Score: {hungarian['f1']:.4f}")
+        logger.info(f"  Hungarian Precision: {hungarian['precision']:.4f}")
+        logger.info(f"  Hungarian Recall: {hungarian['recall']:.4f}")
+        logger.info(f"  Hungarian TP={hungarian['tp']}, FP={hungarian['fp']}, FN={hungarian['fn']}")
 
         # Store in history
         if 'metrics_history' not in self.stats:
@@ -323,7 +331,10 @@ class ManualReviewAlgorithm:
             'fraction_correct': fraction_correct,
             'num_exact_matches': num_exact_matches,
             'num_pred_clusters': num_pred_clusters,
-            'num_gt_clusters': len(gt_clusters)
+            'num_gt_clusters': len(gt_clusters),
+            'hungarian_f1': hungarian['f1'],
+            'hungarian_precision': hungarian['precision'],
+            'hungarian_recall': hungarian['recall']
         })
 
     def _process_responses(self, edge_responses):

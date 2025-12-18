@@ -11,7 +11,7 @@ import os
 import sys
 import json
 import datetime
-from cluster_tools import percent_and_PR, build_node_to_cluster_mapping
+from cluster_tools import percent_and_PR, build_node_to_cluster_mapping, hungarian_cluster_matching
 # Import clustering functions directly
 from init_logger import init_logger
 from run import main as run_clustering
@@ -126,11 +126,20 @@ def calculate_evaluation_metrics(est_clustering, est_node2uuid, gt_clustering, g
             aligned_est_clustering, est_n2c, aligned_gt_clustering, gt_n2c
         )
 
+        # Calculate Hungarian matching metrics (cluster-level)
+        hungarian = hungarian_cluster_matching(aligned_est_clustering, aligned_gt_clustering)
+
         return {
             'f1': f1,
             'precision': precision,
             'recall': recall,
             'frac_correct': frac_correct,
+            'hungarian_f1': hungarian['f1'],
+            'hungarian_precision': hungarian['precision'],
+            'hungarian_recall': hungarian['recall'],
+            'hungarian_tp': hungarian['tp'],
+            'hungarian_fp': hungarian['fp'],
+            'hungarian_fn': hungarian['fn'],
             'num_estimated_clusters': len(est_clustering),
             'num_ground_truth_clusters': len(gt_clustering),
             'num_common_uuids': len(common_uuids),
@@ -142,7 +151,10 @@ def calculate_evaluation_metrics(est_clustering, est_node2uuid, gt_clustering, g
             'f1': 0.0,
             'precision': 0.0,
             'recall': 0.0,
-            'frac_correct': 0.0
+            'frac_correct': 0.0,
+            'hungarian_f1': 0.0,
+            'hungarian_precision': 0.0,
+            'hungarian_recall': 0.0
         }
 
 logger = logging.getLogger("lca")
@@ -218,11 +230,20 @@ def evaluate_field_separated_results(output_base, anno_file, config_log_file,
                     all_metrics.append(metrics)
 
                     # Format metrics for this field
+                    num_pred = metrics.get('num_estimated_clusters', 0)
+                    num_gt = metrics.get('num_ground_truth_clusters', 0)
                     field_text = f"\n{field_str}:\n"
-                    field_text += f"  F1 Score:         {metrics.get('f1', 0):.4f}\n"
-                    field_text += f"  Precision:        {metrics.get('precision', 0):.4f}\n"
-                    field_text += f"  Recall:           {metrics.get('recall', 0):.4f}\n"
-                    field_text += f"  Fraction Correct: {metrics.get('frac_correct', 0):.4f}\n"
+                    field_text += f"  Number of clusters:        {num_pred}\n"
+                    field_text += f"  Number of true clusters:   {num_gt}\n"
+                    if num_gt > 0:
+                        field_text += f"  Cluster count ratio:       {num_pred/num_gt:.4f}\n"
+                    field_text += f"  F1 Score:                  {metrics.get('f1', 0):.4f}\n"
+                    field_text += f"  Precision:                 {metrics.get('precision', 0):.4f}\n"
+                    field_text += f"  Recall:                    {metrics.get('recall', 0):.4f}\n"
+                    field_text += f"  Fraction Correct:          {metrics.get('frac_correct', 0):.4f}\n"
+                    field_text += f"  Hungarian F1 Score:        {metrics.get('hungarian_f1', 0):.4f}\n"
+                    field_text += f"  Hungarian Precision:       {metrics.get('hungarian_precision', 0):.4f}\n"
+                    field_text += f"  Hungarian Recall:          {metrics.get('hungarian_recall', 0):.4f}\n"
                     metrics_text.append(field_text)
 
                 except Exception as e:
@@ -235,15 +256,21 @@ def evaluate_field_separated_results(output_base, anno_file, config_log_file,
             'precision': sum(m.get('precision', 0) for m in all_metrics) / len(all_metrics),
             'recall': sum(m.get('recall', 0) for m in all_metrics) / len(all_metrics),
             'frac_correct': sum(m.get('frac_correct', 0) for m in all_metrics) / len(all_metrics),
+            'hungarian_f1': sum(m.get('hungarian_f1', 0) for m in all_metrics) / len(all_metrics),
+            'hungarian_precision': sum(m.get('hungarian_precision', 0) for m in all_metrics) / len(all_metrics),
+            'hungarian_recall': sum(m.get('hungarian_recall', 0) for m in all_metrics) / len(all_metrics),
         }
 
         summary_text = "".join(metrics_text)
         summary_text += "\n" + "-"*40 + "\n"
         summary_text += "AVERAGE METRICS:\n"
-        summary_text += f"  F1 Score:         {avg_metrics['f1']:.4f}\n"
-        summary_text += f"  Precision:        {avg_metrics['precision']:.4f}\n"
-        summary_text += f"  Recall:           {avg_metrics['recall']:.4f}\n"
-        summary_text += f"  Fraction Correct: {avg_metrics['frac_correct']:.4f}\n"
+        summary_text += f"  F1 Score:              {avg_metrics['f1']:.4f}\n"
+        summary_text += f"  Precision:             {avg_metrics['precision']:.4f}\n"
+        summary_text += f"  Recall:                {avg_metrics['recall']:.4f}\n"
+        summary_text += f"  Fraction Correct:      {avg_metrics['frac_correct']:.4f}\n"
+        summary_text += f"  Hungarian F1 Score:    {avg_metrics['hungarian_f1']:.4f}\n"
+        summary_text += f"  Hungarian Precision:   {avg_metrics['hungarian_precision']:.4f}\n"
+        summary_text += f"  Hungarian Recall:      {avg_metrics['hungarian_recall']:.4f}\n"
 
         # Append to config log file
         append_metrics_to_config_log(config_log_file, summary_text)
@@ -255,26 +282,8 @@ def evaluate_field_separated_results(output_base, anno_file, config_log_file,
 
     return False
 
-
-def main():
-    init_logger()
-    parser = argparse.ArgumentParser(
-        description="Run clustering algorithm and save results in the correct format"
-    )
-
-    parser.add_argument("--config", type=str, required=True,
-                       help="Path to config file")
-    parser.add_argument("--save_dir", type=str,
-                       help="Directory to save formatted results (default: same as clustering output)")
-    parser.add_argument("--interactive", "-i", action='store_true',
-                       help="Enable interactive mode")
-
-    args = parser.parse_args()
-
-    # Load config
-    config = load_config(args.config)
-
-    # Get algorithm type
+def run_clustering_with_save(config, interactive=False, config_path=None, save_dir=None):
+    #  Get algorithm type
     algorithm_type = config.get('algorithm_type', 'unknown')
     print(f"Algorithm type: {algorithm_type}")
 
@@ -314,8 +323,8 @@ def main():
         sys.exit(1)
 
     # Interactive mode
-    if args.interactive:
-        print(f"Config file: {os.path.abspath(args.config)}")
+    if interactive:
+        print(f"Config file: {os.path.abspath(config_path)}")
         print(f"Annotation file: {anno_file}")
         print(f"Output path: {output_base}")
         if separate_by_fields:
@@ -336,7 +345,7 @@ def main():
     print("Step 2: Formatting and saving results...")
     print("="*60)
 
-    save_dir = args.save_dir or output_base
+    save_dir = save_dir or output_base
 
     try:
         if separate_by_fields:
@@ -385,6 +394,7 @@ def main():
         sys.exit(1)
 
     # Step 3: Calculate evaluation metrics (always run if ground truth available)
+    metrics = None
     if config_log_file and name_keys:
         print("\n" + "="*60)
         print("Step 3: Calculating evaluation metrics...")
@@ -416,10 +426,18 @@ def main():
                     metrics = calculate_evaluation_metrics(est_clustering, est_node2uuid, gt_clustering, gt_node2uuid)
 
                     # Format metrics text
-                    metrics_text = f"F1 Score:         {metrics.get('f1', 0):.4f}\n"
-                    metrics_text += f"Precision:        {metrics.get('precision', 0):.4f}\n"
-                    metrics_text += f"Recall:           {metrics.get('recall', 0):.4f}\n"
-                    metrics_text += f"Fraction Correct: {metrics.get('frac_correct', 0):.4f}\n"
+                    num_pred = metrics.get('num_estimated_clusters', 0)
+                    num_gt = metrics.get('num_ground_truth_clusters', 0)
+                    metrics_text = f"Number of clusters:            {num_pred}\n"
+                    metrics_text += f"Number of true clusters:       {num_gt}\n"
+                    metrics_text += f"Cluster count ratio:           {num_pred/num_gt:.4f}\n" if num_gt > 0 else ""
+                    metrics_text += f"F1 Score:                      {metrics.get('f1', 0):.4f}\n"
+                    metrics_text += f"Precision:                     {metrics.get('precision', 0):.4f}\n"
+                    metrics_text += f"Recall:                        {metrics.get('recall', 0):.4f}\n"
+                    metrics_text += f"Fraction Correct:              {metrics.get('frac_correct', 0):.4f}\n"
+                    metrics_text += f"Hungarian F1 Score:            {metrics.get('hungarian_f1', 0):.4f}\n"
+                    metrics_text += f"Hungarian Precision:           {metrics.get('hungarian_precision', 0):.4f}\n"
+                    metrics_text += f"Hungarian Recall:              {metrics.get('hungarian_recall', 0):.4f}\n"
 
                     # Append to config log file
                     append_metrics_to_config_log(config_log_file, metrics_text)
@@ -437,6 +455,34 @@ def main():
     print("\n" + "="*60)
     print("All processing completed!")
     print("="*60)
+
+    return metrics
+    
+
+
+def main():
+    init_logger()
+    parser = argparse.ArgumentParser(
+        description="Run clustering algorithm and save results in the correct format"
+    )
+
+    parser.add_argument("--config", type=str, required=True,
+                       help="Path to config file")
+    parser.add_argument("--save_dir", type=str,
+                       help="Directory to save formatted results (default: same as clustering output)")
+    parser.add_argument("--interactive", "-i", action='store_true',
+                       help="Enable interactive mode")
+
+    args = parser.parse_args()
+
+    # Load config
+    config = load_config(args.config)
+
+    # Run clustering and formatting
+    metrics = run_clustering_with_save(config)
+
+    # Return metrics
+    return metrics
 
 
 if __name__ == "__main__":

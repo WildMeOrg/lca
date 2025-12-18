@@ -14,6 +14,7 @@ import time
 from collections import defaultdict
 import networkx as nx
 from tools import write_json
+import cluster_tools as ct
 import os
 
 logger = logging.getLogger('lca')
@@ -112,7 +113,7 @@ class ThresholdedReviewAlgorithm:
         # Get edges using embeddings' efficient method
         all_edges = self.embeddings.get_edges(
             topk=self.topk,
-            target_edges=expected_edges * 2,
+            target_edges=0, #expected_edges * 2,
             target_proportion=None
         )
 
@@ -365,6 +366,9 @@ class ThresholdedReviewAlgorithm:
         num_pred_clusters = len(pred_clusters)
         fraction_correct = num_exact_matches / num_pred_clusters if num_pred_clusters > 0 else 0
 
+        # Compute Hungarian matching metrics (cluster-level)
+        hungarian = ct.hungarian_cluster_matching(pred_clusters, gt_clusters)
+
         # Log metrics
         logger.info(f"\nEvaluation Metrics - FULL DATASET (after {self.stats['num_human_reviews']} reviews):")
         logger.info(f"  F1 Score: {f1:.4f}")
@@ -372,6 +376,10 @@ class ThresholdedReviewAlgorithm:
         logger.info(f"  Recall: {recall:.4f}")
         logger.info(f"  Fraction Correct: {fraction_correct:.4f} ({num_exact_matches}/{num_pred_clusters} exact cluster matches)")
         logger.info(f"  Pairwise TP={tp}, FP={fp}, FN={fn}")
+        logger.info(f"  Hungarian F1 Score: {hungarian['f1']:.4f}")
+        logger.info(f"  Hungarian Precision: {hungarian['precision']:.4f}")
+        logger.info(f"  Hungarian Recall: {hungarian['recall']:.4f}")
+        logger.info(f"  Hungarian TP={hungarian['tp']}, FP={hungarian['fp']}, FN={hungarian['fn']}")
 
         # Also show statistics about what we've reviewed
         num_edges_reviewed = (self.stats['num_auto_accepted'] +
@@ -394,7 +402,10 @@ class ThresholdedReviewAlgorithm:
             'num_exact_matches': num_exact_matches,
             'num_pred_clusters': num_pred_clusters,
             'num_gt_clusters': len(gt_clusters),
-            'num_edges_reviewed': num_edges_reviewed
+            'num_edges_reviewed': num_edges_reviewed,
+            'hungarian_f1': hungarian['f1'],
+            'hungarian_precision': hungarian['precision'],
+            'hungarian_recall': hungarian['recall']
         })
 
     def _print_batch_statistics(self):

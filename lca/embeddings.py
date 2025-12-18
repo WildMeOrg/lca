@@ -121,8 +121,23 @@ class Embeddings(object):
             
         return self._calculate_distance_matrix(flags)
 
-    def get_edges(self, topk=5, target_edges=10000, target_proportion=None, uuids_filter=None):
-        
+    def get_edges(self, topk=5, botk=0, target_edges=10000, target_proportion=None, uuids_filter=None,
+                  lower_threshold=None, upper_threshold=None):
+        """
+        Get candidate edges based on various selection criteria.
+
+        Args:
+            topk: Number of top neighbors to include for each node (most similar)
+            botk: Number of bottom neighbors to include for each node (least similar)
+            target_edges: Target number of random edges to include
+            target_proportion: Proportion of all possible edges to include randomly
+            uuids_filter: Optional filter for specific UUIDs
+            lower_threshold: Include all edges with score < lower_threshold (certain negatives)
+            upper_threshold: Include all edges with score > upper_threshold (certain positives)
+
+        Returns:
+            set: Set of (node1, node2, score) tuples
+        """
         self.print_func("Calculating distances...")
         start_time = time.time()
         chunks, ids = self.get_distmat_chunks(uuids_filter=uuids_filter)
@@ -137,14 +152,20 @@ class Embeddings(object):
             target_proportion = np.clip(target_edges / max(1, total_edges), 0, 1)
         else:
             target_edges = int(total_edges * target_proportion)
-        
+
         self.print_func(f"Target: {target_edges}/{total_edges}")
-        
+        if lower_threshold is not None or upper_threshold is not None:
+            self.print_func(f"Thresholds: lower={lower_threshold}, upper={upper_threshold}")
+
         for distmat in chunks:
-            sorted_dists = distmat.argsort(axis=1).argsort(axis=1) < topk
-            
+            # Get topk (most similar - lowest distances) and botk (least similar - highest distances)
+            sorted_ranks = distmat.argsort(axis=1).argsort(axis=1)
+            topk_mask = sorted_ranks < topk
+            botk_mask = sorted_ranks >= (distmat.shape[1] - botk) if botk > 0 else np.zeros_like(sorted_ranks, dtype=bool)
+            sorted_dists = np.logical_or(topk_mask, botk_mask)
+
             all_inds_y, all_inds_x = np.triu_indices(n=distmat.shape[0], m=distmat.shape[1], k=start+1)
-            
+
             valid_dists = np.full(distmat.shape, True)
             # valid_dists[all_inds_y, all_inds_x] = True
 
@@ -152,25 +173,40 @@ class Embeddings(object):
             order = np.random.permutation(chunk_len)[:int(chunk_len * target_proportion)]
             all_inds_y = all_inds_y[order]
             all_inds_x = all_inds_x[order]
-            
+
             selected_dists = np.full(distmat.shape, False)
             selected_dists[all_inds_y, all_inds_x] = True
 
             diag_y, diag_x = kth_diag_indices(distmat, start)
 
             filtered = np.logical_or(np.logical_and(sorted_dists, valid_dists), selected_dists)
+
+            # Add threshold-based selection (certain positives and certain negatives)
+            # Note: distmat contains distances (1 - score), so:
+            # - score > upper_threshold means distmat < (1 - upper_threshold)
+            # - score < lower_threshold means distmat > (1 - lower_threshold)
+            if upper_threshold is not None:
+                # Certain positives: high scores (low distances)
+                certain_positives = distmat < (1 - upper_threshold)
+                filtered = np.logical_or(filtered, certain_positives)
+
+            if lower_threshold is not None:
+                # Certain negatives: low scores (high distances)
+                certain_negatives = distmat > (1 - lower_threshold)
+                filtered = np.logical_or(filtered, certain_negatives)
+
             filtered[diag_y, diag_x] = False
             inds_y, inds_x = np.nonzero(filtered)
-            
+
             result.extend([
-                (*sorted([ids[ind1+start], ids[ind2]]), 1-distmat[ind1, ind2]) 
+                (*sorted([ids[ind1+start], ids[ind2]]), 1-distmat[ind1, ind2])
                 for (ind1, ind2) in zip(inds_y, inds_x)
             ])
-            
+
             self.print_func(f"Chunk result: {time.time() - start_time:.6f} seconds")
             start_time = time.time()
             start += filtered.shape[0]
-            
+
         self.print_func(f"Calculated distances: {time.time() - start_time:.6f} seconds")
         self.print_func(f"{len(set(result))}")
         return set(result)
