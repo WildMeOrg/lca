@@ -14,6 +14,7 @@ class Embeddings(object):
         self.embeddings = np.array(embeddings)
         self.uuids = ids
         self.ids = list(ids.keys())
+        self.id_to_idx = {id: idx for idx, id in enumerate(self.ids)}  # O(1) lookup
         self.distance_power = distance_power
         self.print_func = print_func
 
@@ -41,9 +42,10 @@ class Embeddings(object):
         )
         return list(chunks), ids
 
+    @functools.lru_cache(maxsize=1000000)
     def get_score(self, id1, id2):
-        embedding1 = self.embeddings[self.ids.index(id1)]
-        embedding2 = self.embeddings[self.ids.index(id2)]
+        embedding1 = self.embeddings[self.id_to_idx[id1]]
+        embedding2 = self.embeddings[self.id_to_idx[id2]]
         return self.get_embeddings_score(embedding1, embedding2)
     
     def get_embeddings_score(self, embedding1, embedding2):

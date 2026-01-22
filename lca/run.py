@@ -14,8 +14,108 @@ import tempfile
 import shutil
 import itertools
 from tools import EmptyDataframeException, load_dataframe_lightweight, discover_field_values_from_df
+from threshold_utils import find_gaussian_intersection, find_optimal_f1_threshold
+import matplotlib.pyplot as plt
+import numpy as np
 
 logger = logging.getLogger('lca')
+
+
+def plot_edge_score_histograms(histogram_data_list, labels, output_path, bins=30):
+    """
+    Plot histograms of active edge scores for assigned and ground truth labels.
+    Creates 2 figures: one with absolute frequencies, one with normalized densities.
+
+    Args:
+        histogram_data_list: List of dicts from get_active_edge_scores()
+        labels: List of labels for each histogram (e.g., ['After iteration 0', 'Final'])
+        output_path: Path to save the plot (will create _absolute.png and _normalized.png)
+        bins: Number of bins for the histogram
+    """
+    n_histograms = len(histogram_data_list)
+    base_path = output_path.rsplit('.', 1)[0]  # Remove extension
+
+    def plot_single_figure(density, suffix, ylabel):
+        fig, axes = plt.subplots(2, n_histograms, figsize=(6 * n_histograms, 10))
+
+        # Ensure axes is 2D even with single histogram
+        if n_histograms == 1:
+            axes = axes.reshape(2, 1)
+
+        for col, (data, label) in enumerate(zip(histogram_data_list, labels)):
+            assigned_pos = data['assigned_positive_scores']
+            assigned_neg = data['assigned_negative_scores']
+            gt_pos = data['gt_positive_scores']
+            gt_neg = data['gt_negative_scores']
+            threshold = data['classification_threshold']
+
+            # Compute optimal thresholds for each label type
+            assigned_optimal, assigned_f1 = find_optimal_f1_threshold(assigned_pos, assigned_neg)
+            gt_optimal, gt_f1 = find_optimal_f1_threshold(gt_pos, gt_neg)
+
+            # Compute Gaussian intersection thresholds
+            assigned_intersection = find_gaussian_intersection(assigned_pos, assigned_neg)
+            gt_intersection = find_gaussian_intersection(gt_pos, gt_neg)
+
+            # Top row: Assigned labels
+            ax_assigned = axes[0, col]
+            if assigned_pos:
+                ax_assigned.hist(assigned_pos, bins=bins, alpha=0.7,
+                                label=f'Assigned Positive ({len(assigned_pos)})',
+                                color='green', edgecolor='darkgreen', density=density)
+            if assigned_neg:
+                ax_assigned.hist(assigned_neg, bins=bins, alpha=0.7,
+                                label=f'Assigned Negative ({len(assigned_neg)})',
+                                color='red', edgecolor='darkred', density=density)
+            if threshold is not None:
+                ax_assigned.axvline(x=threshold, color='black', linestyle='--', linewidth=2,
+                                   label=f'Used ({threshold:.2f})')
+            if assigned_optimal is not None:
+                ax_assigned.axvline(x=assigned_optimal, color='blue', linestyle=':', linewidth=2,
+                                   label=f'Optimal F1 ({assigned_optimal:.2f}, F1={assigned_f1:.2f})')
+            if assigned_intersection is not None:
+                ax_assigned.axvline(x=assigned_intersection, color='purple', linestyle='-.', linewidth=2,
+                                   label=f'Gaussian Intersect ({assigned_intersection:.2f})')
+            ax_assigned.set_xlabel('Score')
+            ax_assigned.set_ylabel(ylabel)
+            ax_assigned.set_title(f'{label}\nAssigned Labels')
+            ax_assigned.legend()
+            ax_assigned.grid(True, alpha=0.3)
+
+            # Bottom row: Ground truth labels
+            ax_gt = axes[1, col]
+            if gt_pos:
+                ax_gt.hist(gt_pos, bins=bins, alpha=0.7,
+                          label=f'GT Positive ({len(gt_pos)})',
+                          color='green', edgecolor='darkgreen', density=density)
+            if gt_neg:
+                ax_gt.hist(gt_neg, bins=bins, alpha=0.7,
+                          label=f'GT Negative ({len(gt_neg)})',
+                          color='red', edgecolor='darkred', density=density)
+            if threshold is not None:
+                ax_gt.axvline(x=threshold, color='black', linestyle='--', linewidth=2,
+                             label=f'Used ({threshold:.2f})')
+            if gt_optimal is not None:
+                ax_gt.axvline(x=gt_optimal, color='blue', linestyle=':', linewidth=2,
+                             label=f'Optimal F1 ({gt_optimal:.2f}, F1={gt_f1:.2f})')
+            if gt_intersection is not None:
+                ax_gt.axvline(x=gt_intersection, color='purple', linestyle='-.', linewidth=2,
+                             label=f'Gaussian Intersect ({gt_intersection:.2f})')
+            ax_gt.set_xlabel('Score')
+            ax_gt.set_ylabel(ylabel)
+            ax_gt.set_title(f'{label}\nGround Truth Labels')
+            ax_gt.legend()
+            ax_gt.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        save_path = f'{base_path}_{suffix}.png'
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        logger.info(f"Saved edge score histogram to {save_path}")
+
+    # Create both figures
+    plot_single_figure(density=False, suffix='absolute', ylabel='Frequency')
+    plot_single_figure(density=True, suffix='normalized', ylabel='Density')
 
 
 def get_initial_edges(common_data, config):
@@ -137,9 +237,13 @@ def run(config):
         max_outer_iterations = config.get('algorithm', {}).get('max_outer_iterations', 100)
         outer_iteration = 0
 
+        # Histogram data collection (only for GC algorithm)
+        histogram_data_list = []
+        histogram_labels = []
+        is_gc_algorithm = config.get('algorithm_type') == 'gc'
+
         while not algorithm.is_finished() and outer_iteration < max_outer_iterations:
             logger.info(f"Outer iteration {outer_iteration}")
-            outer_iteration += 1
 
             if requested_edges:
                 # Get human responses for edges that need review
@@ -156,10 +260,27 @@ def run(config):
                 logger.info("No edges for human review, continuing algorithm")
                 requested_edges = algorithm.step([])
 
+            # Capture histogram after first iteration
+            if outer_iteration == 0 and is_gc_algorithm:
+                histogram_data_list.append(algorithm.get_active_edge_scores())
+                histogram_labels.append('After iteration 0')
+
+            outer_iteration += 1
+
         if outer_iteration >= max_outer_iterations:
             logger.warning(f"Reached max outer iterations ({max_outer_iterations})")
         else:
             logger.info(f"Algorithm converged after {outer_iteration} outer iterations")
+
+        logger.info(f"Is it GC? {is_gc_algorithm}")
+        # Capture final histogram and plot
+        if is_gc_algorithm:
+            histogram_data_list.append(algorithm.get_active_edge_scores())
+            histogram_labels.append(f'Final (iteration {outer_iteration})')
+
+            histogram_path = config.get('logging', {}).get('histogram_path',
+                                        os.path.join(output_path, 'edge_score_histograms.png'))
+            plot_edge_score_histograms(histogram_data_list, histogram_labels, histogram_path)
         
         logger.info("Algorithm execution completed")
         algorithm.show_stats()
@@ -221,6 +342,7 @@ def main(config):
     """Main drone execution logic."""
     data_params = config['data']
     algorithm_config = config.get('lca', config.get('gc', {}))
+    print(algorithm_config)
     
     # Setup output directory
     temp_db = algorithm_config.get('temp_db', False)

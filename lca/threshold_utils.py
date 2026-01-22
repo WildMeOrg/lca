@@ -1,12 +1,13 @@
 """Utility functions for threshold detection algorithms."""
 
+from typing import Tuple, Optional, Union
 import numpy as np
 from scipy import stats
 from scipy.ndimage import gaussian_filter1d
 from sklearn.mixture import GaussianMixture
 
 
-def fit_robust_gaussian(data: np.ndarray, sigma_threshold: float = 3.0, max_iterations: int = 10) -> tuple[float, float]:
+def fit_robust_gaussian(data: np.ndarray, sigma_threshold: float = 3.0, max_iterations: int = 10) -> Tuple[float, float]:
     """
     Robust Gaussian fitting using iterative σ-clipping.
     
@@ -76,7 +77,7 @@ def fit_gmm(data: np.ndarray, n_components: int = 2, max_iter: int = 200,
 
 def check_gmm_separability(mean1: float, std1: float, weight1: float,
                           mean2: float, std2: float, weight2: float,
-                          failure_threshold: float = 5.0) -> tuple[bool, dict]:
+                          failure_threshold: float = 5.0) -> Tuple[bool, dict]:
     """
     Check if GMM components are well-separated.
     
@@ -142,7 +143,7 @@ def calculate_residuals(tail_samples: np.ndarray, main_mean: float, main_std: fl
 
 
 def find_residual_zero_crossing(residuals: np.ndarray, bin_centers: np.ndarray,
-                               smoothing_sigma: float, bin_width: float) -> tuple[float | None, np.ndarray]:
+                               smoothing_sigma: float, bin_width: float) -> Tuple[Optional[float], np.ndarray]:
     """
     Find zero-crossing point in smoothed residuals.
     
@@ -176,8 +177,8 @@ def evaluate_gaussian_pdf(x: float, mean: float, std: float) -> float:
     return stats.norm.pdf(x, loc=mean, scale=std)
 
 
-def evaluate_mixture_pdf(x: float | np.ndarray, means: np.ndarray, stds: np.ndarray, 
-                        weights: np.ndarray) -> float | np.ndarray:
+def evaluate_mixture_pdf(x: Union[float, np.ndarray], means: np.ndarray, stds: np.ndarray, 
+                        weights: np.ndarray) -> Union[float, np.ndarray]:
     """
     Evaluate 2-component Gaussian mixture PDF at given point(s).
     
@@ -281,7 +282,7 @@ def check_mode_similarity(mode1: float, mode2: float, reference_std: float,
 
 
 def fit_mirrored_gamma(data: np.ndarray, zero_density_point: float = None,
-                      regularization_strength: float = 1.0) -> tuple[float, float, float, float]:
+                      regularization_strength: float = 1.0) -> Tuple[float, float, float, float]:
     """
     Fit mirrored Gamma distribution to data with left tail.
 
@@ -376,8 +377,8 @@ def fit_mirrored_gamma(data: np.ndarray, zero_density_point: float = None,
     return shape, loc, scale, mirror_point
 
 
-def evaluate_mirrored_gamma_pdf(x: float | np.ndarray, shape: float, loc: float, 
-                               scale: float, mirror_point: float) -> float | np.ndarray:
+def evaluate_mirrored_gamma_pdf(x: Union[float, np.ndarray], shape: float, loc: float, 
+                               scale: float, mirror_point: float) -> Union[float, np.ndarray]:
     """
     Evaluate mirrored Gamma PDF at given points.
     
@@ -550,8 +551,125 @@ def extract_tail_samples_gamma(data: np.ndarray, shape: float, loc: float,
     
     # Calculate threshold
     tail_threshold = gamma_mean + sigma_threshold * gamma_std
-    
+
     # Extract tail samples
     tail_samples = data[data > tail_threshold]
-    
+
     return tail_samples, tail_threshold
+
+
+def find_gaussian_intersection(positive_scores, negative_scores):
+    """
+    Find the intersection point of two Gaussian distributions fitted to the scores.
+    This is where p(positive) = p(negative).
+
+    Args:
+        positive_scores: Scores of positive edges (list or array)
+        negative_scores: Scores of negative edges (list or array)
+
+    Returns:
+        float or None: The intersection point between the distributions, or None if not found
+    """
+    if not positive_scores or not negative_scores:
+        return None
+
+    positive_scores = np.asarray(positive_scores)
+    negative_scores = np.asarray(negative_scores)
+
+    if len(positive_scores) < 2 or len(negative_scores) < 2:
+        return None
+
+    # Fit Gaussians to each distribution
+    mu_pos, std_pos = np.mean(positive_scores), np.std(positive_scores)
+    mu_neg, std_neg = np.mean(negative_scores), np.std(negative_scores)
+
+    # Handle edge cases
+    if std_pos == 0 or std_neg == 0:
+        return None
+
+    # If means are equal, intersection is at the mean
+    if np.isclose(mu_pos, mu_neg):
+        return mu_pos
+
+    # If stds are equal, intersection is at midpoint of means
+    if np.isclose(std_pos, std_neg):
+        return (mu_pos + mu_neg) / 2
+
+    # Solve for intersection: find x where N(x|mu_pos,std_pos) = N(x|mu_neg,std_neg)
+    # This leads to a quadratic equation: ax^2 + bx + c = 0
+    a = 1/(std_pos**2) - 1/(std_neg**2)
+    b = -2 * (mu_pos/(std_pos**2) - mu_neg/(std_neg**2))
+    c = (mu_pos**2)/(std_pos**2) - (mu_neg**2)/(std_neg**2) + 2*np.log(std_pos/std_neg)
+
+    discriminant = b**2 - 4*a*c
+
+    if discriminant < 0:
+        return None
+
+    if np.isclose(a, 0):
+        if np.isclose(b, 0):
+            return None
+        return -c / b
+
+    sqrt_discriminant = np.sqrt(discriminant)
+    x1 = (-b + sqrt_discriminant) / (2*a)
+    x2 = (-b - sqrt_discriminant) / (2*a)
+
+    # Return the intersection point that lies between the two means
+    if mu_neg < mu_pos:
+        candidates = [x for x in [x1, x2] if mu_neg <= x <= mu_pos]
+    else:
+        candidates = [x for x in [x1, x2] if mu_pos <= x <= mu_neg]
+
+    if candidates:
+        return candidates[0]
+
+    # If no intersection between means, return the one closer to the midpoint
+    midpoint = (mu_pos + mu_neg) / 2
+    return x1 if abs(x1 - midpoint) < abs(x2 - midpoint) else x2
+
+
+def find_optimal_f1_threshold(positive_scores, negative_scores, n_thresholds=100):
+    """
+    Find the threshold that maximizes F1 score given positive and negative scores.
+
+    Args:
+        positive_scores: Scores of positive edges (list or array)
+        negative_scores: Scores of negative edges (list or array)
+        n_thresholds: Number of threshold values to try
+
+    Returns:
+        tuple: (optimal_threshold, max_f1)
+    """
+    if not positive_scores or not negative_scores:
+        return None, 0.0
+
+    pos = np.asarray(positive_scores)
+    neg = np.asarray(negative_scores)
+
+    all_scores = np.concatenate([pos, neg])
+    min_score, max_score = np.min(all_scores), np.max(all_scores)
+
+    thresholds = np.linspace(min_score, max_score, n_thresholds)
+
+    best_threshold = None
+    best_f1 = 0.0
+
+    for threshold in thresholds:
+        # Classify: score > threshold -> positive
+        tp = np.sum(pos > threshold)
+        fp = np.sum(neg > threshold)
+        fn = np.sum(pos <= threshold)
+
+        if tp == 0:
+            continue
+
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+
+        if f1 > best_f1:
+            best_f1 = f1
+            best_threshold = threshold
+
+    return best_threshold, best_f1

@@ -39,11 +39,11 @@ class ClusterValidator(object):
                 r_clustering[k] = new_cc
                 k += 1
             if k - prev_k > 1:
-                logger.info('GT cluster %a split into %a ...' % (cc, k - prev_k))
+                # logger.info('GT cluster %a split into %a ...' % (cc, k - prev_k))
                 for i in range(prev_k, k):
                     logger.info('   %a' % r_clustering[i])
-            else:
-                logger.info('GT cluster %a is intact' % cc)
+            # else:
+                # logger.info('GT cluster %a is intact' % cc)
         r_node2cid = ct.build_node_to_cluster_mapping(r_clustering)
 
         return r_clustering, r_node2cid
@@ -122,7 +122,7 @@ class ClusterValidator(object):
             'f1 score': f1,
             
             # 'per size': per_size,
-            'non equal': non_equal_clustering,
+            # 'non equal': non_equal_clustering,
             # 'current clustering': clustering
         }
 

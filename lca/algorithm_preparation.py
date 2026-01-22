@@ -38,6 +38,7 @@ from hdbscan_algorithm import HDBSCANAlgorithm
 from manual_review_algorithm import ManualReviewAlgorithm
 from thresholded_review_algorithm import ThresholdedReviewAlgorithm
 from hdbscan_embeddings import HDBSCANEmbeddings
+from stability_algorithm import LCAv3StabilityAlgorithm
 
 logger = logging.getLogger('lca')
 
@@ -841,6 +842,8 @@ def create_algorithm(config):
         algorithm = prepare_manual_review(common_data, config)
     elif algorithm_type == 'thresholded_review':
         algorithm = prepare_thresholded_review(common_data, config)
+    elif algorithm_type == 'stability':
+        algorithm = prepare_stability(common_data, config)
     else:
         raise ValueError(f"Unknown algorithm type: {algorithm_type}")
     
@@ -909,6 +912,151 @@ def prepare_thresholded_review(common_data, config):
     # Create and return Thresholded Review instance
     thresholded_instance = ThresholdedReviewAlgorithm(thresholded_config, common_data)
     return thresholded_instance
+
+
+def prepare_stability(common_data, config):
+    """
+    Prepare LCA v3 (stability-driven) algorithm instance.
+
+    This algorithm implements stability-driven clustering with active review.
+    It treats GC behavior as alpha=0 stability and iteratively increases
+    stability by selecting lowest-stability cases for human review.
+
+    Args:
+        common_data: Common data from prepare_common
+        config: Configuration dictionary
+
+    Returns:
+        LCAv3StabilityAlgorithm: Configured stability algorithm instance
+    """
+    # Get stability-specific config, falling back to gc config for compatibility
+    stability_config = config.get('stability', config.get('gc', {})).copy()
+
+    # Merge edge_weights settings
+    edge_weights = config.get('edge_weights', config.get('lca', {}).get('edge_weights', {}))
+    stability_config['prob_human_correct'] = edge_weights.get('prob_human_correct', 0.98)
+
+    # Get parameters from various config sections
+    stability_config['theta'] = stability_config.get('theta', 0.1)
+    stability_config['target_alpha'] = stability_config.get('target_alpha', 0.5)  # [0, 1] scale
+    stability_config['max_human_reviews'] = stability_config.get('max_human_reviews', 1000)
+    stability_config['review_confidence'] = stability_config.get('review_confidence', 0.97)  # [0, 1] scale
+    stability_config['warmup_iterations'] = stability_config.get('warmup_iterations', 10)
+    stability_config['edges_per_review_batch'] = stability_config.get('edges_per_review_batch', 200)
+    stability_config['validation_step'] = stability_config.get('validation_step', 100)
+    stability_config['max_densify_edges'] = stability_config.get('max_densify_edges', 2000)
+    stability_config['cross_pcc_max_edges'] = stability_config.get('cross_pcc_max_edges', 10000)
+    stability_config['merge_priority'] = stability_config.get('merge_priority', 0.7)  # Prioritize merge candidates
+
+    # Phase 0 aggressiveness controls
+    stability_config['phase0_alpha'] = stability_config.get('phase0_alpha', 0.0)  # 0.0 = strict, -0.1 = lenient
+    stability_config['densify_prioritize_negatives'] = stability_config.get('densify_prioritize_negatives', False)
+
+    algorithm_params = config.get("algorithm", {})
+    lca_config = config.get("lca", {})
+    tries_before_edge_done = algorithm_params.get('tries_before_edge_done',
+                                                 lca_config.get('iterations', {}).get('tries_before_edge_done', 4))
+    stability_config["tries_before_edge_done"] = tries_before_edge_done
+
+    logger.info(f"Stability algorithm config:")
+    logger.info(f"  theta: {stability_config['theta']}")
+    logger.info(f"  target_alpha: {stability_config['target_alpha']}")
+    logger.info(f"  phase0_alpha: {stability_config['phase0_alpha']}")
+    logger.info(f"  max_human_reviews: {stability_config['max_human_reviews']}")
+    logger.info(f"  review_confidence: {stability_config['review_confidence']}")
+    logger.info(f"  merge_priority: {stability_config['merge_priority']}")
+    logger.info(f"  densify_prioritize_negatives: {stability_config['densify_prioritize_negatives']}")
+
+    # Build classifier manager (reuse GC's classifier setup)
+    verifier_names_str = edge_weights.get('verifier_names', edge_weights.get('augmentation_names', 'miewid human'))
+    verifier_names = verifier_names_str.split() if isinstance(verifier_names_str, str) else verifier_names_str
+
+    classifier_thresholds = edge_weights.get('classifier_thresholds', {})
+    classifier_units = {}
+
+    do_robust_plot = "auto_threshold_plot_path" in config.get("logging", {})
+    robust_plot_path = config.get("logging", {}).get("auto_threshold_plot_path", "dist.png")
+
+    for name in classifier_thresholds:
+        if name not in common_data['embeddings_dict']:
+            continue
+        embeddings = common_data['embeddings_dict'][name]
+        if isinstance(embeddings, types.FunctionType):
+            embeddings = embeddings()
+
+        threshold = classifier_thresholds[name]
+        if isinstance(threshold, str):
+            if "auto" in threshold:
+                import re
+                match = re.match(r'auto\((\d+\.?\d*)\)', threshold)
+                threshold_fraction = float(match.group(1)) if match else 0.15
+
+                unfiltered_embeddings_dict = common_data.get('unfiltered_embeddings_dict', {})
+                if name in unfiltered_embeddings_dict:
+                    thresh_embeddings = unfiltered_embeddings_dict[name]
+                    if isinstance(thresh_embeddings, types.FunctionType):
+                        thresh_embeddings = thresh_embeddings()
+                else:
+                    thresh_embeddings = embeddings
+
+                if hasattr(embeddings, 'get_base'):
+                    thresh_embeddings = embeddings.get_base()
+
+                threshold = robust_gmm_find_threshold(
+                    np.array(thresh_embeddings.get_all_scores()),
+                    entropy_alpha=1-threshold_fraction,
+                    verbose=True,
+                    print_func=logger.info,
+                    plot_path=robust_plot_path
+                )
+            elif threshold in classifier_units:
+                classifier = classifier_units[threshold]
+                classifier_units[name] = classifier
+                continue
+
+        classifier = ThresholdBasedClassifier(threshold)
+        logger.info(f"Created threshold-based classifier for {name} with threshold {threshold}")
+        classifier_units[name] = (embeddings, classifier)
+
+    for name in verifier_names:
+        if 'human' in name:
+            continue
+        if name not in classifier_units:
+            embeddings = common_data['embeddings_dict'].get(name)
+            if embeddings is None:
+                continue
+
+            unfiltered_embeddings_dict = common_data.get('unfiltered_embeddings_dict', {})
+            if name in unfiltered_embeddings_dict:
+                thresh_embeddings = unfiltered_embeddings_dict[name]
+                if isinstance(thresh_embeddings, types.FunctionType):
+                    thresh_embeddings = thresh_embeddings()
+            else:
+                thresh_embeddings = embeddings
+
+            threshold = robust_gmm_find_threshold(
+                np.array(thresh_embeddings.get_all_scores()),
+                verbose=True,
+                print_func=logger.info,
+                plot_path=robust_plot_path,
+            )
+            classifier = ThresholdBasedClassifier(threshold)
+            logger.warning(f"No threshold for {name}, using default auto threshold {threshold}")
+            classifier_units[name] = (embeddings, classifier)
+
+    classifier_manager = ClassifierManager(
+        verifier_names=verifier_names,
+        classifier_units=classifier_units
+    )
+
+    # Create stability algorithm instance
+    stability_instance = LCAv3StabilityAlgorithm(
+        stability_config,
+        classifier_manager=classifier_manager,
+        cluster_validator=common_data['cluster_validator']
+    )
+
+    return stability_instance
 
 
 def call_verifier_alg(embeddings):

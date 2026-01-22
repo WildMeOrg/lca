@@ -4,6 +4,7 @@ import networkx as nx
 import numpy as np
 import logging
 from tools import order_edge
+from threshold_utils import find_gaussian_intersection
 
 # Update to graph_consistency.py
 
@@ -31,6 +32,7 @@ class GraphConsistencyAlgorithm(object):
         self.deactivations_this_iteration = 0
 
         # Warm-up and human review queue
+        self.adjustment_warmup_iterations = config.get('adjustment_warmup_iterations', 5)
         self.warmup_iterations = config.get('warmup_iterations', 10)
         self.warmup_completed = False
         self.human_review_queue = set()  # Set to avoid duplicates
@@ -39,7 +41,41 @@ class GraphConsistencyAlgorithm(object):
         # Reactivation phase flag - when True, only send to human review, no deactivation
         self.reactivation_phase = False
 
+        # Threshold adjustment parameters
+        self.reviews_before_adjustment = config.get('reviews_before_adjustment', 0)  # 0 = disabled
+        self.last_adjustment_reviews = 0
+
         print(f"self.THETA {self.config['theta']}")
+
+        # Pre-sorted list of all possible edges (initialized lazily)
+        self._all_edges_sorted = None
+        self._sorted_edge_index = 0  # Track position in the sorted list
+
+    def initialize_sorted_edge_list(self, embeddings):
+        """
+        Initialize the sorted list of all possible edges by score (descending).
+        Called lazily on first cross-PCC edge discovery.
+        """
+        logger = logging.getLogger('lca')
+
+        all_nodes = list(self.G.nodes())
+        n_nodes = len(all_nodes)
+
+        logger.info(f"Computing all pairwise scores for {n_nodes} nodes ({n_nodes * (n_nodes - 1) // 2} edges)...")
+
+        all_edges = []
+        for i in range(n_nodes):
+            for j in range(i + 1, n_nodes):
+                n0, n1 = all_nodes[i], all_nodes[j]
+                score = embeddings.get_score(n0, n1)
+                all_edges.append((n0, n1, score))
+
+        # Sort by score descending (highest score = most likely positive, first)
+        all_edges.sort(key=lambda x: x[2], reverse=True)
+
+        self._all_edges_sorted = all_edges
+        self._sorted_edge_index = 0
+        logger.info(f"Initialized sorted edge list with {len(all_edges)} edges (top score: {all_edges[0][2]:.4f}, bottom: {all_edges[-1][2]:.4f})")
 
     def get_confidence(self, n0, n1):
         """
@@ -85,6 +121,14 @@ class GraphConsistencyAlgorithm(object):
         else:
             self.warmup_iterations = 1  # After warm-up, single iteration per step
 
+        # Threshold adjustment based on accumulated human reviews
+        if self.reviews_before_adjustment > 0:
+            reviews_since_adjustment = self.num_human_reviews - self.last_adjustment_reviews
+            if reviews_since_adjustment >= self.reviews_before_adjustment:
+                logger.info(f"Triggering threshold adjustment after {reviews_since_adjustment} reviews")
+                self.adjust_threshold()
+                self.warmup_iterations = self.adjustment_warmup_iterations
+
         accumulated_human_review_edges = set()
         iteration = 0
         while iteration < self.warmup_iterations:
@@ -94,7 +138,7 @@ class GraphConsistencyAlgorithm(object):
             self.deactivations_this_iteration = 0  # Reset counter
 
             # Discover cross-PCC edges EVERY iteration to balance precision/recall
-            num_discovered = self.discover_cross_pcc_edges()
+            num_discovered, cross_edges_for_human = self.discover_cross_pcc_edges()
             logger.info(f"Discovered {num_discovered} cross-PCC edges")
 
             # Find inconsistencies
@@ -136,6 +180,8 @@ class GraphConsistencyAlgorithm(object):
                 self.add_new_edges(new_classifications)
 
             # Filter and accumulate human review edges
+            edges_for_human = edges_for_human
+            
             edges_for_human = self.filter_for_review(edges_for_human)
             logger.info(f"{len(edges_for_human)} edges need human review this iteration")
 
@@ -162,6 +208,8 @@ class GraphConsistencyAlgorithm(object):
 
         # Validation logic
         self._handle_validation()
+
+        
 
         # Add accumulated edges to review queue
         self.human_review_queue.update(accumulated_human_review_edges)
@@ -265,17 +313,21 @@ class GraphConsistencyAlgorithm(object):
     def discover_cross_pcc_edges(self):
         """
         Discover edges between different positive connected components.
-        Samples multiple edges per PCC pair to balance precision and recall.
+
+        Uses a pre-sorted list of ALL possible edges (sorted by score, highest first).
+        Iterates through the list and adds top edges that:
+        - Are not already in the graph
+        - Connect two different PCCs (not within the same PCC)
+
         Returns number of edges discovered.
         """
         logger = logging.getLogger('lca')
 
-        positive_G = self.get_positive_subgraph(self.G)
-        components = list(nx.connected_components(positive_G))
+        components = self.get_positive_components(self.G)
 
         if len(components) <= 1:
             logger.info("Only one PCC, no cross-PCC edges to discover")
-            return 0
+            return 0, []
 
         logger.info(f"Discovering cross-PCC edges between {len(components)} components")
 
@@ -287,72 +339,61 @@ class GraphConsistencyAlgorithm(object):
 
         embeddings, _ = self.classifier_manager.classifier_units[first_classifier]
 
-        # Configuration - aggressive defaults
-        edges_per_pcc_pair = self.config.get('cross_pcc_edges_per_pair', 20)  # Multiple edges per pair
-        max_pcc_pairs = self.config.get('max_cross_pcc_pairs', 500)  # Limit number of PCC pairs examined
+        # Initialize sorted edge list if not already done
+        if self._all_edges_sorted is None:
+            self.initialize_sorted_edge_list(embeddings)
+            logger.info(f"Initialized queue of edges: {len(self._all_edges_sorted)}")
 
-        new_edges = set()
+        # Build node-to-component mapping for current PCCs
+        node_to_component = {}
+        for comp_idx, comp in enumerate(components):
+            for node in comp:
+                node_to_component[node] = comp_idx
 
-        # Convert components to lists for sampling
-        comp_list = [list(comp) for comp in components]
+        # Configuration
+        max_edges_to_discover = self.config.get('cross_pcc_max_edges', 100)
 
-        # Sample PCC pairs if there are too many
-        pcc_pairs = []
-        for i in range(len(comp_list)):
-            for j in range(i + 1, len(comp_list)):
-                pcc_pairs.append((i, j))
+        new_edges = []
+        edges_checked = 0
+        edges_skipped_in_graph = 0
+        edges_skipped_same_pcc = 0
+        human_edges = []
+        # Iterate through sorted edges starting from current index (highest score first)
+        while len(new_edges) < max_edges_to_discover and self._sorted_edge_index < len(self._all_edges_sorted):
+            n0, n1, score = self._all_edges_sorted[self._sorted_edge_index]
+            self._sorted_edge_index += 1
+            edges_checked += 1
 
-        if len(pcc_pairs) > max_pcc_pairs:
-            logger.info(f"Sampling {max_pcc_pairs} PCC pairs from {len(pcc_pairs)} total")
-            pcc_pairs = random.sample(pcc_pairs, max_pcc_pairs)
-
-        # For each PCC pair, discover multiple edges
-        for i, j in pcc_pairs:
-            comp1 = comp_list[i]
-            comp2 = comp_list[j]
-
-            # Collect candidate edges with scores
-            candidates = []
-
-            # Sample nodes if components are large
-            max_nodes_per_comp = self.config.get('max_nodes_per_comp_for_discovery', 50)
-            sample1 = random.sample(comp1, min(len(comp1), max_nodes_per_comp))
-            sample2 = random.sample(comp2, min(len(comp2), max_nodes_per_comp))
-
-            for n0 in sample1:
-                for n1 in sample2:
-                    if not self.G.has_edge(n0, n1):
-                        score = embeddings.get_score(n0, n1)
-                        candidates.append((min(n0, n1), max(n0, n1), score))
-
-            if not candidates:
+            # Skip if already in graph
+            if self.G.has_edge(n0, n1):
+                edges_skipped_in_graph += 1
                 continue
 
-            # Sort by score and take top K high-scoring AND bottom K low-scoring
-            # This balances discovery of potential merges (high scores) and confirmatory negatives (low scores)
-            candidates.sort(key=lambda x: x[2], reverse=True)
+            # Get component membership for both nodes
+            comp0 = node_to_component.get(n0)
+            comp1 = node_to_component.get(n1)            
 
-            edges_to_add = set()
-            k = edges_per_pcc_pair // 2
+            # Skip if both nodes are in the same PCC (we want cross-PCC edges only)
+            if comp0 == comp1:
+                edges_skipped_same_pcc += 1
+                continue
 
-            # Top k highest scores (potential positives/merges)
-            edges_to_add.update(candidates[:k])
-
-            # Bottom k lowest scores (potential negatives/confirmations)
-            if len(candidates) > k:
-                edges_to_add.update(candidates[-k:])
-
-            # Classify and add these edges
-            for n0, n1, score in edges_to_add:
-                edge = self.classifier_manager.classify_edge(n0, n1, first_classifier)
-                new_edges.add(edge)
+            # This edge connects two different PCCs - classify and add
+            edge = self.classifier_manager.classify_edge(n0, n1, first_classifier)
+            ordered_edge = (*order_edge(n0, n1), edge[2])
+            human_edges.append(ordered_edge)
+            new_edges.append(edge)
 
         if new_edges:
-            logger.info(f"Discovered {len(new_edges)} cross-PCC edges ({len(pcc_pairs)} PCC pairs examined)")
-            # new_edges are already in processed format (n0, n1, score, confidence, label, classifier_name)
-            self.add_new_edges(list(new_edges))
+            logger.info(f"Discovered {len(new_edges)} cross-PCC edges from sorted list "
+                       f"(checked {edges_checked}, skipped {edges_skipped_in_graph} in-graph, "
+                       f"{edges_skipped_same_pcc} same-PCC, index now at {self._sorted_edge_index}/{len(self._all_edges_sorted)})")
+            self.add_new_edges(new_edges)
+        else:
+            logger.info(f"No new cross-PCC edges found (checked {edges_checked} edges, "
+                       f"index at {self._sorted_edge_index}/{len(self._all_edges_sorted)})")
 
-        return len(new_edges)
+        return len(new_edges), human_edges
 
     def discover_cross_cluster_inconsistencies(self):
         """
@@ -371,8 +412,7 @@ class GraphConsistencyAlgorithm(object):
         """
         logger = logging.getLogger('lca')
 
-        positive_G = self.get_positive_subgraph(self.G)
-        components = list(nx.connected_components(positive_G))
+        components = self.get_positive_components(self.G)
 
         if len(components) <= 1:
             return []
@@ -532,7 +572,14 @@ class GraphConsistencyAlgorithm(object):
         no_ipcc = len(getattr(self, 'current_iPCCs', [])) == 0
         queue_empty = len(self.human_review_queue) == 0
         no_deactivated = self.config.get('reactivation_batch_size', 0) == 0 or len(self.get_deactivated_edges()) == 0
-        return no_ipcc and queue_empty and no_deactivated
+        no_more_edges = self._sorted_edge_index >= len(self._all_edges_sorted)
+        logger = logging.getLogger('lca')
+        logger.info("Checking finish condition:")
+        logger.info(f"  - no_ipcc: {no_ipcc}")
+        logger.info(f"  - queue_empty: {queue_empty}")
+        logger.info(f"  - no_deactivated: {no_deactivated}")
+        logger.info(f"  - no_more_edges: {no_more_edges}")
+        return no_ipcc and queue_empty and no_deactivated and no_more_edges
 
     def get_clustering(self):
         """
@@ -556,16 +603,8 @@ class GraphConsistencyAlgorithm(object):
             node2cid (dict): A mapping of each node to its cluster ID.
         """
 
-        positive_G = self.get_positive_subgraph(self.G)
-        
-        # Find connected components
-        clusters = list(nx.connected_components(positive_G))
-  
-        used_nodes = {n for c in clusters for n in c}
-        singletons = [n for n in self.G.nodes() if n not in used_nodes]#np.setdiff1d(list(self.G.nodes()), used_nodes)
-        
-        clusters = clusters + [{int(n)} for n in singletons]
-        # print(clusters)
+        # Get connected components (already includes singletons)
+        clusters = self.get_positive_components(self.G)
 
         # Convert list to a dictionary {cluster_id: set_of_nodes}
         cluster_dict = {cid: cluster for cid, cluster in enumerate(clusters)}
@@ -640,43 +679,42 @@ class GraphConsistencyAlgorithm(object):
                 self.G.add_edge(n0, n1, score=score, label=label, confidence=confidence, is_active=True, inactivated_edges=set(), deactivator=None, ranker=ranker_name, auto_flipped=False)
         
 
-    def get_nonnegative_subgraph(self, G):
-        # Extract positive edges
-        positive_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("label") != "negative" and d.get('is_active')]
+    def get_positive_components(self, G, min_confidence=0):
+        """
+        Get connected components based on positive active edges.
+        Uses subgraph_view for efficiency (no copying).
 
-        # Create a subgraph with only positive edges
-        positive_G = G.edge_subgraph(positive_edges).copy()
-        singletons = [n for n in self.G.nodes() if n not in positive_G.nodes()]
-        positive_G.add_nodes_from(singletons)
+        Returns:
+            list of sets: Connected components (including singletons)
+        """
+        def filter_edge(u, v):
+            d = G[u][v]
+            return (d.get("label") == "positive" and
+                    d.get("confidence", 0) > min_confidence and
+                    d.get('is_active', False))
 
-        return positive_G
-    
-    def get_positive_subgraph(self, G, min_confidence=0):
-        # Extract positive edges
-        positive_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("label") == "positive" and d.get("confidence") > min_confidence and d.get('is_active')]
+        view = nx.subgraph_view(G, filter_edge=filter_edge)
+        components = list(nx.connected_components(view))
 
-        # Create a subgraph with only positive edges
-        positive_G = G.edge_subgraph(positive_edges).copy()
-        singletons = [n for n in self.G.nodes() if n not in positive_G.nodes()]
-        positive_G.add_nodes_from(singletons)
-        return positive_G
+        # Add singletons (nodes with no positive edges)
+        used_nodes = {n for c in components for n in c}
+        singletons = [{n} for n in G.nodes() if n not in used_nodes]
+
+        return components + singletons
 
     
 
     def find_inconsistent_PCCs(self, logger):
         """
-        Find inconsistent Positive Connected Components, i.e. a connected components generate by positive edges, 
+        Find inconsistent Positive Connected Components, i.e. a connected components generate by positive edges,
         with at least one negative edge between the nodes of that component.
 
         Returns a list of subgraphs corresponding to inconsistent Positive Connected Components.
         """
         result = []
-        
-        # Create a subgraph with only positive edges
-        positive_G = self.get_positive_subgraph(self.G)
-        
-        # Find connected components
-        components = list(nx.connected_components(positive_G))
+
+        # Get connected components (uses view, no copying)
+        components = self.get_positive_components(self.G)
         logger.info(f"Found connected components {len(components)}")   
         # logger.info(f"Total positive edges: {np.sum(d.get('label') == 'negative' for _, _, d in self.G.edges(data=True))}")
         # logger.info(f"Total negative edges: {np.sum(d.get('label') == 'positive' for _, _, d in self.G.edges(data=True))}")
@@ -706,62 +744,215 @@ class GraphConsistencyAlgorithm(object):
             iPCC (nx.Graph): a subgraph containing inconsistent PCC
         """
         result = set()
-        
+
         # Find all negative edges in iPCC
-        negative_edges = [(u, v) for u, v, d in iPCC.edges(data=True) if d.get("label") == "negative" and d.get('is_active')]
-        # print(f"negative edges {negative_edges}")
+        negative_edges = [(u, v) for u, v, d in iPCC.edges(data=True)
+                          if d.get("label") == "negative" and d.get('is_active')]
 
-        nonnegiPCC = self.get_nonnegative_subgraph(iPCC).copy()
+        if not negative_edges:
+            return result
 
+        # Build graph of non-negative active edges with confidence as weight
+        nonneg_graph = nx.Graph()
+        for u, v, d in iPCC.edges(data=True):
+            if d.get("label") != "negative" and d.get('is_active'):
+                nonneg_graph.add_edge(u, v, weight=d.get('confidence', 0))
+
+        if nonneg_graph.number_of_edges() == 0:
+            return result
+
+        # Maximum Spanning Tree: path between any two nodes in MST is the widest path
+        # (path with highest minimum edge weight) in the original graph
+        mst = nx.maximum_spanning_tree(nonneg_graph, weight='weight')
 
         for n0, n1 in negative_edges:
-            nonnegiPCC.add_edge(n0, n1, **iPCC[n0][n1])
-            active_edges = [(u, v) for u, v, d in nonnegiPCC.edges(data=True) if d.get('is_active')]
-            active_edges.append((n0, n1))
             neg_confidence = self.get_confidence(n0, n1)
 
-            activeiPCC = nonnegiPCC.edge_subgraph(active_edges).copy()
-            cycles = list(nx.cycle_basis(activeiPCC))
-            # Filter cycles that contain (n0, n1)
-            valid_cycles = [cycle for cycle in cycles if n0 in cycle and n1 in cycle]
+            # Find widest path from n0 to n1 (path in MST)
+            if not (mst.has_node(n0) and mst.has_node(n1)):
+                continue
 
-            if valid_cycles:
-                # Find the cycle with the highest minimum confidence
-                best_cycle = max(valid_cycles, key=lambda cycle: min(self.get_confidence(u, v) for u, v in zip(cycle, cycle[1:] + [cycle[0]])))
+            try:
+                path = nx.shortest_path(mst, n0, n1)
+            except nx.NetworkXNoPath:
+                continue
 
-                (u, v, min_confidence) = min(
-                    [(u, v, self.get_confidence(u, v)) for u, v in zip(best_cycle, best_cycle[1:] + [best_cycle[0]]) if (u, v) != (n0, n1) and (v, u) != (n0, n1)],
-                    key=lambda edge: edge[2]
-                )
-               
-                # During reactivation phase, use infinite theta to prevent deactivation
-                # This forces all edges to human review for a second chance
-                theta = float('inf') if self.reactivation_phase else self.config['theta']
+            if len(path) < 2:
+                continue
 
-                if min_confidence > neg_confidence:
-                    if abs(min_confidence - neg_confidence) > theta:
-                        self.deactivate((u,v), (n0, n1))
-                    else:
-                        # Only add if edge hasn't exhausted human review attempts
-                        edge_key = order_edge(n0, n1)
-                        if self.human_attempts.get(edge_key, 0) < self.tries_before_edge_done:
-                            result.add((*edge_key, self.G[n0][n1].get('ranker', None)))
-                        if self.reactivation_phase:
-                            self.deactivate((u,v), (n0, n1))
+            # Find minimum confidence edge in the path
+            path_edges = list(zip(path[:-1], path[1:]))
+            u, v, min_confidence = min(
+                [(a, b, self.get_confidence(a, b)) for a, b in path_edges],
+                key=lambda edge: edge[2]
+            )
 
+            # During reactivation phase, use infinite theta to prevent deactivation
+            theta = float('inf') if self.reactivation_phase else self.config['theta']
+
+            if min_confidence > neg_confidence:
+                if abs(min_confidence - neg_confidence) > theta:
+                    self.deactivate((u, v), (n0, n1))
                 else:
-                    if abs(min_confidence - neg_confidence) > theta:
-                        self.deactivate((n0, n1), (u,v))
-                    else:
-                        # Only add if edge hasn't exhausted human review attempts
-                        edge_key = order_edge(u, v)
-                        if self.human_attempts.get(edge_key, 0) < self.tries_before_edge_done:
-                            result.add((*edge_key, self.G[u][v].get('ranker', None)))
-                        if self.reactivation_phase:
-                            self.deactivate((n0, n1), (u,v))
-                        
-            nonnegiPCC.remove_edge(n0, n1)
-        
+                    edge_key = order_edge(n0, n1)
+                    if self.human_attempts.get(edge_key, 0) < self.tries_before_edge_done:
+                        result.add((*edge_key, self.G[n0][n1].get('ranker', None)))
+                    if self.reactivation_phase:
+                        self.deactivate((u, v), (n0, n1))
+            else:
+                if abs(min_confidence - neg_confidence) > theta:
+                    self.deactivate((n0, n1), (u, v))
+                else:
+                    edge_key = order_edge(u, v)
+                    if self.human_attempts.get(edge_key, 0) < self.tries_before_edge_done:
+                        result.add((*edge_key, self.G[u][v].get('ranker', None)))
+                    if self.reactivation_phase:
+                        self.deactivate((n0, n1), (u, v))
+
         return result
+
+    def adjust_threshold(self):
+        """
+        Adjust classifier threshold based on Gaussian intersection of assigned labels.
+        Reclassifies all active edges that were classified by the adjusted classifier.
+        """
+        logger = logging.getLogger('lca')
+
+        # Get the first algorithmic classifier (the one we'll adjust)
+        if not self.classifier_manager.algo_classifiers:
+            logger.warning("No algorithmic classifiers available for threshold adjustment")
+            return
+
+        classifier_name = self.classifier_manager.algo_classifiers[0]
+        embeddings, classifier = self.classifier_manager.classifier_units[classifier_name]
+
+        # Check if classifier has a threshold attribute
+        if not hasattr(classifier, 'threshold'):
+            logger.warning(f"Classifier {classifier_name} does not have a threshold attribute")
+            return
+
+        # Collect scores and edges to reclassify in single pass
+        positive_scores = []
+        negative_scores = []
+        edges_to_reclassify = []
+        old_labels = {}
+
+        for u, v, data in self.G.edges(data=True):
+            if not data.get('is_active', False):
+                continue
+
+            ranker = data.get('ranker', '')
+            label = data.get('label', '')
+
+            # Get score for threshold calculation
+            if 'human' in ranker:
+                score = embeddings.get_score(u, v)
+            else:
+                score = data.get('score', 0.0)
+
+            if label == 'positive':
+                positive_scores.append(score)
+            elif label == 'negative':
+                negative_scores.append(score)
+
+            # Track edges that need reclassification
+            if ranker == classifier_name:
+                edges_to_reclassify.append((u, v))
+                old_labels[(u, v)] = label
+
+        # Calculate Gaussian intersection
+        new_threshold = find_gaussian_intersection(positive_scores, negative_scores)
+
+        if new_threshold is None:
+            logger.info("Could not compute Gaussian intersection, keeping current threshold")
+            return
+
+        old_threshold = classifier.threshold
+        logger.info(f"Adjusting threshold: {old_threshold:.4f} -> {new_threshold:.4f}")
+        classifier.threshold = old_threshold + (new_threshold - old_threshold) * self.config.get('threshold_adjustment_factor', 0.1)
+
+        logger.info(f"Reclassifying {len(edges_to_reclassify)} active edges with new threshold")
+
+        # Reclassify edges and count label flips
+        reclassified_edges = []
+        neg_to_pos = 0
+        pos_to_neg = 0
+        for u, v in edges_to_reclassify:
+            old_label = old_labels[(u, v)]
+            edge = self.classifier_manager.classify_edge(u, v, classifier_name)
+            new_label = edge[4]
+            if old_label == 'negative' and new_label == 'positive':
+                neg_to_pos += 1
+            elif old_label == 'positive' and new_label == 'negative':
+                pos_to_neg += 1
+            reclassified_edges.append(edge)
+
+        # Update graph with reclassified edges
+        self.add_new_edges(reclassified_edges)
+
+        logger.info(f"Label flips: {neg_to_pos} negative→positive, {pos_to_neg} positive→negative")
+
+        self.last_adjustment_reviews = self.num_human_reviews
+
+    def get_active_edge_scores(self):
+        """
+        Get scores of all active edges grouped by assigned label and ground truth label.
+        For human-verified edges, uses the original embedding score instead of 0/1.
+
+        Returns:
+            dict: {
+                'assigned_positive_scores': scores of edges with assigned positive label,
+                'assigned_negative_scores': scores of edges with assigned negative label,
+                'gt_positive_scores': scores of edges where nodes are in same GT cluster,
+                'gt_negative_scores': scores of edges where nodes are in different GT clusters,
+                'classification_threshold': the threshold used by the classifier for labeling
+            }
+        """
+        assigned_positive_scores = []
+        assigned_negative_scores = []
+        gt_positive_scores = []
+        gt_negative_scores = []
+
+        # Get embeddings to retrieve original scores for human-verified edges
+        classifier_name = self.classifier_manager.algo_classifiers[0]
+        embeddings, classifier = self.classifier_manager.classifier_units[classifier_name]
+
+        # Get ground truth node2cid if available
+        gt_node2cid = None
+        if self.cluster_validator is not None:
+            gt_node2cid = self.cluster_validator.gt_node2cid
+
+        for u, v, data in self.G.edges(data=True):
+            if data.get('is_active', False):
+                # Get the original score from embeddings (not the 0/1 from human review)
+                ranker = data.get('ranker', '')
+                if 'human' in ranker:
+                    score = embeddings.get_score(u, v)
+                else:
+                    score = data.get('score', 0.0)
+
+                # Assigned label distribution
+                label = data.get('label', '')
+                if label == 'positive':
+                    assigned_positive_scores.append(score)
+                elif label == 'negative':
+                    assigned_negative_scores.append(score)
+
+                # Ground truth label distribution
+                if gt_node2cid is not None and u in gt_node2cid and v in gt_node2cid:
+                    if gt_node2cid[u] == gt_node2cid[v]:
+                        gt_positive_scores.append(score)
+                    else:
+                        gt_negative_scores.append(score)
+
+        classification_threshold = classifier.threshold
+
+        return {
+            'assigned_positive_scores': assigned_positive_scores,
+            'assigned_negative_scores': assigned_negative_scores,
+            'gt_positive_scores': gt_positive_scores,
+            'gt_negative_scores': gt_negative_scores,
+            'classification_threshold': classification_threshold
+        }
 
 

@@ -182,6 +182,26 @@ def find_threshold(scores, entropy_alpha=0.85, n_init=1, verbose=False, print_fu
         mu = mu3[1:3]
         sigma2 = sigma2_3[1:3]
 
+        # Fallback: if bulk is still rightmost, create synthetic right tail
+        if pi[0] < pi[1] and mu[0] < mu[1]:
+            if verbose:
+                print_func("⚠ Could not find right tail, creating synthetic component...")
+
+            bulk_pi = pi[1]
+            bulk_mu = mu[1]
+            bulk_sigma2 = sigma2[1]
+            bulk_sigma = np.sqrt(bulk_sigma2)
+
+            # Position fake component so intersection is at right tail of bulk
+            fake_mu = bulk_mu + 5 * bulk_sigma
+            fake_sigma2 = bulk_sigma2 * 1.5
+
+            fake_pi = max(1 - bulk_pi, 0.001)  # minimum weight for F1 optimization
+            pi = np.array([bulk_pi, fake_pi])
+            pi /= pi.sum()
+            mu = np.array([bulk_mu, fake_mu])
+            sigma2 = np.array([bulk_sigma2, fake_sigma2])
+
     # Find optimal threshold
     threshold, predicted_f1 = _find_threshold(pi, mu, sigma2)
     print_func(f"✅ Optimal threshold: {threshold:.4f}, predicted F1: {predicted_f1:.4f}")
