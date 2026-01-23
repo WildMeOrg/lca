@@ -23,6 +23,7 @@ class GraphConsistencyAlgorithm(object):
         # Validation tracking
         self.validation_step = config.get('validation_step', 20)
         self.num_human_reviews = 0
+        self.max_human_reviews = config.get('max_human_reviews', None)  # None = unlimited
         self.validation_initialized = False
 
         self.tries_before_edge_done = config.get('tries_before_edge_done', 4)
@@ -45,7 +46,8 @@ class GraphConsistencyAlgorithm(object):
         self.reviews_before_adjustment = config.get('reviews_before_adjustment', 0)  # 0 = disabled
         self.last_adjustment_reviews = 0
 
-        print(f"self.THETA {self.config['theta']}")
+        logger = logging.getLogger('lca')
+        logger.info(f"GC Algorithm initialized with theta={self.config['theta']}, max_human_reviews={self.max_human_reviews}")
 
         # Pre-sorted list of all possible edges (initialized lazily)
         self._all_edges_sorted = None
@@ -192,6 +194,10 @@ class GraphConsistencyAlgorithm(object):
                 ordered_edge = (*order_edge(n0, n1), s, confidence)
                 accumulated_human_review_edges.add(ordered_edge)
 
+            # Log metrics during phase 0 (warmup) iterations
+            if self.num_human_reviews == 0:
+                self._log_phase0_metrics(iteration)
+
             # Check if we made autonomous progress via deactivations
             if self.deactivations_this_iteration == 0:
                 # No deactivations - can't make more progress without human input
@@ -261,6 +267,26 @@ class GraphConsistencyAlgorithm(object):
     def show_stats(self):
         clustering, node2cid, G = self.get_clustering()
         self.cluster_validator.trace_iter_compare_to_gt(clustering, node2cid, self.num_human_reviews, G)
+
+    def _log_phase0_metrics(self, iteration):
+        """Log metrics during phase 0 (warmup) iterations before human review starts."""
+        if not self.cluster_validator:
+            return
+
+        logger = logging.getLogger('lca')
+        clustering, node2cid, G = self.get_clustering()
+
+        # Use cluster_validator's incremental_stats directly to avoid prev_num_human check
+        gt_clustering = self.cluster_validator.gt_clustering
+        gt_node2cid = self.cluster_validator.gt_node2cid
+
+        info_text = f'Phase 0 iteration {iteration}'
+        result = self.cluster_validator.incremental_stats(
+            0,  # num_human = 0 during phase 0
+            clustering, node2cid, gt_clustering, gt_node2cid, info_text
+        )
+        result['phase0_iteration'] = iteration
+        return result
 
     def densify_component(self, subG):
         max_edges_to_add = self.config["max_densify_edges"]
@@ -568,17 +594,26 @@ class GraphConsistencyAlgorithm(object):
 
         Returns:
             bool: True if no inconsistent PCCs exist AND review queue is empty AND no deactivated edges
+                  OR if max_human_reviews limit is reached
         """
+        logger = logging.getLogger('lca')
+
+        # Check max_human_reviews limit first
+        if self.max_human_reviews is not None and self.num_human_reviews >= self.max_human_reviews:
+            logger.info(f"Reached max human reviews limit ({self.max_human_reviews})")
+            return True
+
         no_ipcc = len(getattr(self, 'current_iPCCs', [])) == 0
         queue_empty = len(self.human_review_queue) == 0
         no_deactivated = self.config.get('reactivation_batch_size', 0) == 0 or len(self.get_deactivated_edges()) == 0
         no_more_edges = self._sorted_edge_index >= len(self._all_edges_sorted)
-        logger = logging.getLogger('lca')
         logger.info("Checking finish condition:")
         logger.info(f"  - no_ipcc: {no_ipcc}")
         logger.info(f"  - queue_empty: {queue_empty}")
         logger.info(f"  - no_deactivated: {no_deactivated}")
         logger.info(f"  - no_more_edges: {no_more_edges}")
+        if self.max_human_reviews is not None:
+            logger.info(f"  - human_reviews: {self.num_human_reviews}/{self.max_human_reviews}")
         return no_ipcc and queue_empty and no_deactivated and no_more_edges
 
     def get_clustering(self):

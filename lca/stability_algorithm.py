@@ -69,6 +69,9 @@ class LCAv3StabilityAlgorithm:
         self.validation_step = config.get('validation_step', 20)
         self.validation_initialized = False
 
+        # Phase 0 iteration counter for metric logging
+        self.phase0_iteration = 0
+
         logger.info(f"LCA v2 Stability Algorithm initialized")
         logger.info(f"  Target alpha: {self.target_alpha}")
         logger.info(f"  Phase 0 alpha: {self.phase0_alpha}")
@@ -121,6 +124,10 @@ class LCAv3StabilityAlgorithm:
         Per PDF: "The initial goal is to make positive-inactive assignments that
         will make the graph 0-stable. This is done entirely without human input."
         """
+        # Increment phase 0 iteration counter
+        self.phase0_iteration += 1
+        logger.info(f"=== Phase 0 iteration {self.phase0_iteration} ===")
+
         # Discover cross-PCC edges
         num_discovered = self._discover_cross_pcc_edges()
         logger.info(f"Discovered {num_discovered} cross-PCC edges")
@@ -142,9 +149,16 @@ class LCAv3StabilityAlgorithm:
         deactivations = self.graph.make_zero_stable(alpha=self.phase0_alpha)
         logger.info(f"Made {deactivations} edges positive-inactive for {self.phase0_alpha}-stability")
 
+        # Log metrics for this phase 0 iteration
+        self._log_phase0_metrics(self.phase0_iteration)
+
         # Check for transition to ACTIVE_REVIEW
-        if self._all_edges_sorted and self._sorted_edge_index >= len(self._all_edges_sorted):
-            logger.info("=== Phase 0 complete - all edges processed ===")
+        # Must have: 1) all edges processed, AND 2) no deactivations (converged)
+        all_edges_processed = self._all_edges_sorted and self._sorted_edge_index >= len(self._all_edges_sorted)
+        converged = (deactivations == 0 and num_discovered == 0)
+
+        if all_edges_processed and converged:
+            logger.info("=== Phase 0 complete - all edges processed and converged ===")
             self._log_stats()
 
             # Validation after Phase 0 completes
@@ -157,6 +171,9 @@ class LCAv3StabilityAlgorithm:
             else:
                 self.phase = "FINISHED"
                 return []
+
+        if all_edges_processed and not converged:
+            logger.info(f"All edges processed but not converged (deactivations={deactivations}, discovered={num_discovered}) - continuing")
 
         # Continue Phase 0 (no human review yet)
         return []
@@ -370,7 +387,8 @@ class LCAv3StabilityAlgorithm:
         if self.phase == "FINISHED":
             return True
 
-        if self.num_human_reviews >= self.max_human_reviews:
+        # Don't terminate due to max_human_reviews during Phase 0 - let it complete
+        if self.phase != "PHASE0" and self.num_human_reviews >= self.max_human_reviews:
             return True
 
         # Check if all edges processed and 0-stable
@@ -454,3 +472,22 @@ class LCAv3StabilityAlgorithm:
     def show_stats(self):
         """Public method to display algorithm statistics."""
         self._log_stats()
+
+    def _log_phase0_metrics(self, iteration):
+        """Log metrics during phase 0 iterations before human review starts."""
+        if not self.cluster_validator:
+            return
+
+        clustering, node2cid, G = self.get_clustering()
+
+        # Use cluster_validator's incremental_stats directly to avoid prev_num_human check
+        gt_clustering = self.cluster_validator.gt_clustering
+        gt_node2cid = self.cluster_validator.gt_node2cid
+
+        info_text = f'Phase 0 iteration {iteration}'
+        result = self.cluster_validator.incremental_stats(
+            0,  # num_human = 0 during phase 0
+            clustering, node2cid, gt_clustering, gt_node2cid, info_text
+        )
+        result['phase0_iteration'] = iteration
+        return result
