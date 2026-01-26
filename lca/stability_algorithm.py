@@ -165,12 +165,16 @@ class LCAv3StabilityAlgorithm:
         self._log_phase0_metrics(self.phase0_iteration)
 
         # Check for transition to ACTIVE_REVIEW
-        # Must have: 1) all edges processed, AND 2) no deactivations (converged)
+        # Must have: 1) all edges processed OR no edges to process, AND 2) no deactivations (converged)
         all_edges_processed = self._all_edges_sorted and self._sorted_edge_index >= len(self._all_edges_sorted)
+        no_edges_to_process = self._all_edges_sorted is None or len(self._all_edges_sorted) == 0
         converged = (deactivations == 0 and num_discovered == 0)
 
-        if all_edges_processed and converged:
-            logger.info("=== Phase 0 complete - all edges processed and converged ===")
+        # Transition to ACTIVE_REVIEW if:
+        # - All edges processed and converged, OR
+        # - No edges to process and converged (small graph case)
+        if (all_edges_processed or no_edges_to_process) and converged:
+            logger.info("=== Phase 0 complete - converged ===")
             self._log_stats()
 
             # Validation after Phase 0 completes

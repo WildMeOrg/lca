@@ -151,7 +151,12 @@ def prepare_common(config):
     all_node2uuid = {i: uuid for i, uuid in enumerate(uuids)}
     
     gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(filtered_df, filter_key, id_key)
-    
+
+    # Check for single annotation - no clustering needed
+    if len(node2uuid) == 1:
+        logger.info("Only 1 annotation found - skipping LCA clustering")
+        raise SingleAnnotationException(node2uuid, gt_clustering, gt_node2cid)
+
     cluster_validator = ClusterValidator(gt_clustering, gt_node2cid)
     ga_driver.set_validator_functions(
         cluster_validator.trace_start_human, 
