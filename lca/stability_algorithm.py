@@ -215,7 +215,22 @@ class LCAv3StabilityAlgorithm:
         stats = self.graph.get_graph_stats()
         min_internal = stats['min_internal_stability']
         min_external = stats['min_external_stability']
-        current_alpha = min(min_internal, min_external) if min_internal != float('inf') else 0.0
+
+        # Handle inf values correctly:
+        # - inf means "perfectly stable" (no conflicts), not "unknown"
+        # - Single-element PCCs have inf internal stability (nothing to destabilize)
+        # - PCCs with no cross-PCC negative edges have inf external stability
+        if min_internal == float('inf') and min_external == float('inf'):
+            # Graph is perfectly stable
+            current_alpha = float('inf')
+        elif min_internal == float('inf'):
+            # Internal is perfect, use external only
+            current_alpha = min_external
+        elif min_external == float('inf'):
+            # External is perfect, use internal only
+            current_alpha = min_internal
+        else:
+            current_alpha = min(min_internal, min_external)
 
         logger.info(f"Current stability: internal={min_internal:.4f}, external={min_external:.4f}")
 
