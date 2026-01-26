@@ -50,6 +50,8 @@ class LCAv3StabilityAlgorithm:
         # Human review parameters
         self.ch = config.get('human_confidence', 0.5)  # Confidence added/subtracted per review
         self.edges_per_review_batch = config.get('edges_per_review_batch', 20)  # Max edges per batch
+        self.tries_before_edge_done = config.get('tries_before_edge_done', 4)  # Max reviews per edge
+        self.human_attempts = {}  # Track review attempts per edge: {(n0, n1): count}
 
         # Cross-PCC edge discovery
         self._all_edges_sorted = None
@@ -77,6 +79,7 @@ class LCAv3StabilityAlgorithm:
         logger.info(f"  Phase 0 alpha: {self.phase0_alpha}")
         logger.info(f"  Human confidence (ch): {self.ch}")
         logger.info(f"  Max human reviews: {self.max_human_reviews}")
+        logger.info(f"  Tries before edge done: {self.tries_before_edge_done}")
 
     def step(self, new_edges: List[Tuple]) -> List[Tuple[int, int, float]]:
         """
@@ -95,10 +98,19 @@ class LCAv3StabilityAlgorithm:
         needs_restabilization = False
         for edge in new_edges:
             if len(edge) > 3 and 'human' in str(edge[3]):
-                self.num_human_reviews += 1
                 n0, n1, score, verifier_name = edge[:4]
-                if self._apply_human_feedback(n0, n1, score):
-                    needs_restabilization = True
+
+                # Track human review attempts per edge
+                edge_key = (min(n0, n1), max(n0, n1))
+                attempts = self.human_attempts.get(edge_key, 0)
+
+                if attempts < self.tries_before_edge_done:
+                    self.human_attempts[edge_key] = attempts + 1
+                    self.num_human_reviews += 1
+                    if self._apply_human_feedback(n0, n1, score):
+                        needs_restabilization = True
+                else:
+                    logger.warning(f"Edge {edge_key} exceeded max attempts ({self.tries_before_edge_done}), skipping")
 
         # Per PDF step 5: "Update the labels of edges to make the graph 0-stable"
         # Only needed if any review flipped a negative edge to positive
@@ -213,8 +225,25 @@ class LCAv3StabilityAlgorithm:
         batch = self.graph.select_non_conflicting_candidates_lazy(alpha=self.target_alpha, max_batch_size=self.edges_per_review_batch)
         logger.info("Candidate generation complete")
 
+        # Filter out edges that have exceeded max human review attempts
+        filtered_batch = []
+        skipped_count = 0
+        for edge in batch:
+            n0, n1 = edge[0], edge[1]
+            edge_key = (min(n0, n1), max(n0, n1))
+            attempts = self.human_attempts.get(edge_key, 0)
+            if attempts < self.tries_before_edge_done:
+                filtered_batch.append(edge)
+            else:
+                skipped_count += 1
+
+        if skipped_count > 0:
+            logger.info(f"Skipped {skipped_count} edges that exceeded max attempts ({self.tries_before_edge_done})")
+
+        batch = filtered_batch
+
         if not batch:
-            logger.info("No review candidates - graph at maximum stability")
+            logger.info("No review candidates - graph at maximum stability or all candidates exceeded max attempts")
             self.phase = "FINISHED"
             return []
 

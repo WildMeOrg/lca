@@ -603,18 +603,46 @@ class GraphConsistencyAlgorithm(object):
             logger.info(f"Reached max human reviews limit ({self.max_human_reviews})")
             return True
 
-        no_ipcc = len(getattr(self, 'current_iPCCs', [])) == 0
-        queue_empty = len(self.human_review_queue) == 0
-        no_deactivated = self.config.get('reactivation_batch_size', 0) == 0 or len(self.get_deactivated_edges()) == 0
-        no_more_edges = self._sorted_edge_index >= len(self._all_edges_sorted)
-        logger.info("Checking finish condition:")
-        logger.info(f"  - no_ipcc: {no_ipcc}")
-        logger.info(f"  - queue_empty: {queue_empty}")
-        logger.info(f"  - no_deactivated: {no_deactivated}")
-        logger.info(f"  - no_more_edges: {no_more_edges}")
+        # Gather detailed stats
+        num_ipcc = len(getattr(self, 'current_iPCCs', []))
+        queue_size = len(self.human_review_queue)
+        deactivated_edges = self.get_deactivated_edges()
+        num_deactivated = len(deactivated_edges)
+        reactivation_enabled = self.config.get('reactivation_batch_size', 0) > 0
+        total_edges = len(self._all_edges_sorted) if self._all_edges_sorted else 0
+        edge_progress_pct = (self._sorted_edge_index / total_edges * 100) if total_edges > 0 else 0
+
+        # Compute conditions
+        no_ipcc = num_ipcc == 0
+        queue_empty = queue_size == 0
+        no_deactivated = not reactivation_enabled or num_deactivated == 0
+        no_more_edges = self._sorted_edge_index >= total_edges
+
+        logger.info("=" * 50)
+        logger.info("FINISH CONDITION CHECK:")
+        logger.info(f"  iPCCs remaining:        {num_ipcc} (need 0)")
+        logger.info(f"  Review queue size:      {queue_size} (need 0)")
+        logger.info(f"  Deactivated edges:      {num_deactivated} (need 0, reactivation={'ON' if reactivation_enabled else 'OFF'})")
+        logger.info(f"  Edge discovery:         {self._sorted_edge_index}/{total_edges} ({edge_progress_pct:.1f}%)")
         if self.max_human_reviews is not None:
-            logger.info(f"  - human_reviews: {self.num_human_reviews}/{self.max_human_reviews}")
-        return no_ipcc and queue_empty and no_deactivated and no_more_edges
+            logger.info(f"  Human reviews:          {self.num_human_reviews}/{self.max_human_reviews}")
+
+        # Show why we're not finished
+        if not (no_ipcc and queue_empty and no_deactivated):
+            blockers = []
+            if not no_ipcc:
+                blockers.append(f"{num_ipcc} iPCCs")
+            if not queue_empty:
+                blockers.append(f"{queue_size} queued edges")
+            if not no_deactivated:
+                blockers.append(f"{num_deactivated} deactivated edges")
+            logger.info(f"  BLOCKED BY: {', '.join(blockers)}")
+        else:
+            logger.info("  STATUS: All conditions met - FINISHED")
+        logger.info("=" * 50)
+
+        # return no_ipcc and queue_empty and no_deactivated and no_more_edges
+        return no_ipcc and queue_empty and no_deactivated 
 
     def get_clustering(self):
         """
