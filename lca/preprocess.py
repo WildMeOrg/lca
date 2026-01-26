@@ -37,22 +37,22 @@ def load_to_df(anno_path,format='standard', print_func=print):
     return df
 
 def filter_field_df(df, field, field_values, print_func=print):
-    """Generic field filtering function with substring matching."""
-    def contains_any_filter(value):
-        """Check if any filter_value is contained in the value as substring."""
+    """Generic field filtering function with exact matching."""
+    def matches_any_filter(value):
+        """Check if value exactly matches any filter_value."""
         if pd.isna(value):
             return False
         value_str = str(value)
-        return any(str(filter_val) in value_str for filter_val in field_values)
-    
+        return any(str(filter_val) == value_str for filter_val in field_values)
+
     if field in df.columns:
-        df = df[df[field].apply(contains_any_filter)]
-        print_func(f'      {len(df)} annotations remain after filtering by {field} list {field_values} (substring match)')
+        df = df[df[field].apply(matches_any_filter)]
+        print_func(f'      {len(df)} annotations remain after filtering by {field} list {field_values}')
     else:
         name_field = f"name_{field}"
         if name_field in df.columns:
-            df = df[df[name_field].apply(contains_any_filter)]
-            print_func(f'      {len(df)} annotations remain after filtering by {name_field} list {field_values} (substring match)')
+            df = df[df[name_field].apply(matches_any_filter)]
+            print_func(f'      {len(df)} annotations remain after filtering by {name_field} list {field_values}')
         else:
             print_func(f'      WARNING: Field {field} not found for filtering')
     return df
