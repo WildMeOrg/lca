@@ -13,7 +13,7 @@ import os
 import tempfile
 import shutil
 import itertools
-from tools import EmptyDataframeException, load_dataframe_lightweight, discover_field_values_from_df
+from tools import EmptyDataframeException, SingleAnnotationException, load_dataframe_lightweight, discover_field_values_from_df
 from threshold_utils import find_gaussian_intersection, find_optimal_f1_threshold
 import matplotlib.pyplot as plt
 import numpy as np
@@ -213,6 +213,20 @@ def run(config):
         write_json({}, os.path.join(output_path, 'node2uuid_file.json'))
         write_json({}, os.path.join(output_path, 'graph.json'))
         return ({}, {}, {})
+    except SingleAnnotationException as e:
+        logger.info(e)
+        logger.info(f"Saving single-annotation result to {output_path}")
+        # Create a single cluster with the one annotation
+        node2uuid = e.node2uuid
+        node_id = list(node2uuid.keys())[0]
+        uuid = node2uuid[node_id]
+        clustering = {'0': [node_id]}  # Single cluster with ID 0
+        node2cid = {str(node_id): '0'}
+        write_json(clustering, os.path.join(output_path, 'clustering.json'))
+        write_json(node2cid, os.path.join(output_path, 'node2cid.json'))
+        write_json({str(k): v for k, v in node2uuid.items()}, os.path.join(output_path, 'node2uuid_file.json'))
+        write_json({}, os.path.join(output_path, 'graph.json'))
+        return (clustering, node2cid, node2uuid)
     
     # Check if we need to handle temp database cleanup for LCA
     algorithm_type = config.get('algorithm_type', 'lca')

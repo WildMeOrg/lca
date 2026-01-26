@@ -19,6 +19,14 @@ import numpy as np
 class EmptyDataframeException(Exception):
     pass
 
+class SingleAnnotationException(Exception):
+    """Raised when only one annotation remains after filtering - no clustering needed."""
+    def __init__(self, node2uuid, gt_clustering=None, gt_node2cid=None):
+        self.node2uuid = node2uuid
+        self.gt_clustering = gt_clustering
+        self.gt_node2cid = gt_node2cid
+        super().__init__("Only one annotation - skipping LCA clustering")
+
 def kth_diag_indices(a, k):
     rows, cols = np.diag_indices_from(a)
     if k < 0:
