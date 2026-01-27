@@ -11,6 +11,7 @@ import os
 import sys
 import json
 import datetime
+from collections import defaultdict
 from cluster_tools import percent_and_PR, build_node_to_cluster_mapping, hungarian_cluster_matching
 # Import clustering functions directly
 from init_logger import init_logger
@@ -140,8 +141,8 @@ def calculate_evaluation_metrics(est_clustering, est_node2uuid, gt_clustering, g
             'hungarian_tp': hungarian['tp'],
             'hungarian_fp': hungarian['fp'],
             'hungarian_fn': hungarian['fn'],
-            'num_estimated_clusters': len(est_clustering),
-            'num_ground_truth_clusters': len(gt_clustering),
+            'num_estimated_clusters': len(aligned_est_clustering),
+            'num_ground_truth_clusters': len(aligned_gt_clustering),
             'num_common_uuids': len(common_uuids),
             'per_size_metrics': per_size
         }
@@ -281,6 +282,137 @@ def evaluate_field_separated_results(output_base, anno_file, config_log_file,
         return True
 
     return False
+
+def evaluate_global_clustering(output_base, anno_file, config_log_file,
+                               gt_key='individual_id', pred_key='encounter_id',
+                               uuid_key='uuid'):
+    """Evaluate global clustering using individual_id as GT and encounter_id as predictions.
+
+    This computes dataset-wide pairwise metrics, capturing cross-occurrence
+    fragmentation that per-occurrence evaluation misses.
+    """
+    combined_file = os.path.join(output_base, "lca_annots.json")
+    if not os.path.exists(combined_file):
+        print(f"Combined output file not found: {combined_file}, skipping global evaluation")
+        return None
+
+    with open(combined_file, 'r') as f:
+        data = json.load(f)
+
+    annotations = data.get('annotations', [])
+
+    # Build GT and predicted clustering: cluster_id -> set of uuids
+    gt_clusters = defaultdict(set)
+    pred_clusters = defaultdict(set)
+
+    skipped = 0
+    for ann in annotations:
+        uid = ann.get(uuid_key)
+        gt_id = ann.get(gt_key)
+        pred_id = ann.get(pred_key)
+
+        if uid is None or gt_id is None or pred_id is None:
+            skipped += 1
+            continue
+
+        gt_clusters[str(gt_id)].add(uid)
+        pred_clusters[str(pred_id)].add(uid)
+
+    if not gt_clusters or not pred_clusters:
+        print("No valid annotations for global evaluation")
+        return None
+
+    # Build uuid -> cluster mappings
+    uuid_to_gt = {}
+    for cid, uuids in gt_clusters.items():
+        for u in uuids:
+            uuid_to_gt[u] = cid
+
+    uuid_to_pred = {}
+    for cid, uuids in pred_clusters.items():
+        for u in uuids:
+            uuid_to_pred[u] = cid
+
+    # Efficient pairwise metric computation using cluster sizes
+    # TP = pairs in same pred cluster AND same gt cluster
+    # FP = pairs in same pred cluster but different gt cluster
+    # FN = pairs in same gt cluster but different pred cluster
+    tp = 0
+    fp = 0
+    fn = 0
+
+    # For each predicted cluster, count pairs by GT group
+    for pred_cid, pred_uuids in pred_clusters.items():
+        gt_group_sizes = defaultdict(int)
+        for u in pred_uuids:
+            if u in uuid_to_gt:
+                gt_group_sizes[uuid_to_gt[u]] += 1
+        n = sum(gt_group_sizes.values())
+        total_pairs = n * (n - 1) // 2
+        same_gt_pairs = sum(k * (k - 1) // 2 for k in gt_group_sizes.values())
+        tp += same_gt_pairs
+        fp += total_pairs - same_gt_pairs
+
+    # For each GT cluster, count pairs by predicted group
+    for gt_cid, gt_uuids in gt_clusters.items():
+        pred_group_sizes = defaultdict(int)
+        for u in gt_uuids:
+            if u in uuid_to_pred:
+                pred_group_sizes[uuid_to_pred[u]] += 1
+        n = sum(pred_group_sizes.values())
+        total_pairs = n * (n - 1) // 2
+        same_pred_pairs = sum(k * (k - 1) // 2 for k in pred_group_sizes.values())
+        fn += total_pairs - same_pred_pairs
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    # Cluster purity (fraction of annotations matching majority GT in their pred cluster)
+    correct = 0
+    total = 0
+    for pred_cid, pred_uuids in pred_clusters.items():
+        gt_counts = defaultdict(int)
+        for u in pred_uuids:
+            if u in uuid_to_gt:
+                gt_counts[uuid_to_gt[u]] += 1
+                total += 1
+        if gt_counts:
+            correct += max(gt_counts.values())
+    purity = correct / total if total > 0 else 0.0
+
+    # Format output
+    text = "\n" + "=" * 60 + "\n"
+    text += "GLOBAL EVALUATION (individual_id vs encounter_id)\n"
+    text += "=" * 60 + "\n"
+    text += f"  Number of annotations:         {len(annotations) - skipped}\n"
+    text += f"  Number of true individuals:    {len(gt_clusters)}\n"
+    text += f"  Number of predicted clusters:  {len(pred_clusters)}\n"
+    text += f"  Cluster ratio (pred/gt):       {len(pred_clusters)/len(gt_clusters):.2f}\n"
+    text += f"  Pairwise TP:                   {tp}\n"
+    text += f"  Pairwise FP:                   {fp}\n"
+    text += f"  Pairwise FN:                   {fn}\n"
+    text += f"  Pairwise Precision:            {precision:.4f}\n"
+    text += f"  Pairwise Recall:               {recall:.4f}\n"
+    text += f"  Pairwise F1:                   {f1:.4f}\n"
+    text += f"  Cluster Purity:                {purity:.4f}\n"
+    text += "=" * 60 + "\n"
+
+    print(text)
+
+    # Append to log file
+    append_metrics_to_config_log(config_log_file, text)
+
+    return {
+        'num_annotations': len(annotations) - skipped,
+        'num_gt_individuals': len(gt_clusters),
+        'num_pred_clusters': len(pred_clusters),
+        'pairwise_precision': precision,
+        'pairwise_recall': recall,
+        'pairwise_f1': f1,
+        'purity': purity,
+    }
+
 
 def run_clustering_with_save(config, interactive=False, config_path=None, save_dir=None):
     #  Get algorithm type
@@ -451,6 +583,20 @@ def run_clustering_with_save(config, interactive=False, config_path=None, save_d
                 print(f"Error calculating metrics: {e}")
                 import traceback
                 traceback.print_exc()
+
+    # Step 4: Global evaluation (individual_id vs encounter_id across all occurrences)
+    if config_log_file and name_keys and separate_by_fields:
+        print("\n" + "="*60)
+        print("Step 4: Global clustering evaluation...")
+        print("="*60)
+
+        gt_key = name_keys[0] if name_keys else 'individual_id'
+        evaluate_global_clustering(
+            output_base, anno_file, config_log_file,
+            gt_key=gt_key,
+            pred_key=output_key,
+            uuid_key=uuid_key
+        )
 
     print("\n" + "="*60)
     print("All processing completed!")
