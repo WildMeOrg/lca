@@ -381,6 +381,9 @@ def evaluate_global_clustering(output_base, anno_file, config_log_file,
             correct += max(gt_counts.values())
     purity = correct / total if total > 0 else 0.0
 
+    # Hungarian matching (cluster-level)
+    hungarian = hungarian_cluster_matching(pred_clusters, gt_clusters)
+
     # Format output
     text = "\n" + "=" * 60 + "\n"
     text += "GLOBAL EVALUATION (individual_id vs encounter_id)\n"
@@ -396,6 +399,12 @@ def evaluate_global_clustering(output_base, anno_file, config_log_file,
     text += f"  Pairwise Recall:               {recall:.4f}\n"
     text += f"  Pairwise F1:                   {f1:.4f}\n"
     text += f"  Cluster Purity:                {purity:.4f}\n"
+    text += f"  Hungarian TP:                  {hungarian['tp']}\n"
+    text += f"  Hungarian FP:                  {hungarian['fp']}\n"
+    text += f"  Hungarian FN:                  {hungarian['fn']}\n"
+    text += f"  Hungarian Precision:           {hungarian['precision']:.4f}\n"
+    text += f"  Hungarian Recall:              {hungarian['recall']:.4f}\n"
+    text += f"  Hungarian F1:                  {hungarian['f1']:.4f}\n"
     text += "=" * 60 + "\n"
 
     print(text)
@@ -411,6 +420,9 @@ def evaluate_global_clustering(output_base, anno_file, config_log_file,
         'pairwise_recall': recall,
         'pairwise_f1': f1,
         'purity': purity,
+        'hungarian_precision': hungarian['precision'],
+        'hungarian_recall': hungarian['recall'],
+        'hungarian_f1': hungarian['f1'],
     }
 
 
