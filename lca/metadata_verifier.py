@@ -138,80 +138,80 @@ class MetadataEmbeddings:
 
 class metadata_verifier(object):
     def __init__(self, data_df, node2uuid, id_key='uuid'):
-        self.data_df = data_df
         self.node2uuid = node2uuid
         self.uuid2node = {val:key for (key, val) in node2uuid.items()}
         self.id_key = id_key
 
         # Detect available column names (support multiple naming conventions)
         cols = set(data_df.columns)
-        self.datetime_col = 'datetime' if 'datetime' in cols else 'timestamp'
-        self.filename_col = 'file_name' if 'file_name' in cols else 'image_path'
+        datetime_col = 'datetime' if 'datetime' in cols else 'timestamp'
+        filename_col = 'file_name' if 'file_name' in cols else 'image_path'
 
-        logger.info(f"metadata_verifier using datetime_col='{self.datetime_col}', filename_col='{self.filename_col}'")
+        logger.info(f"metadata_verifier using datetime_col='{datetime_col}', filename_col='{filename_col}'")
 
-    def get_image_metadata(self, uuid):
-        """Get metadata for an annotation UUID.
+        # Pre-cache all metadata: uuid -> (lon, lat, datetime_parsed, filename)
+        # This avoids O(n) DataFrame scans per lookup
+        self._cache = {}
+        has_gps = 'gps_lon' in cols and 'gps_lat' in cols
+        has_datetime = datetime_col in cols
+        has_filename = filename_col in cols
 
-        Supports both direct annotation metadata and image-joined metadata.
-        Fields: gps_lon, gps_lat, datetime/timestamp, file_name/image_path
-        """
-        row = self.data_df.loc[self.data_df[self.id_key] == uuid]
-        if row.empty:
-            return ["-1", "-1", "", ""]
+        for _, row in data_df.iterrows():
+            uuid = row[id_key]
 
-        # Get GPS coordinates
-        longitude = row["gps_lon"].squeeze() if "gps_lon" in row.columns else -1
-        latitude = row["gps_lat"].squeeze() if "gps_lat" in row.columns else -1
+            # Parse GPS
+            lon, lat = -1.0, -1.0
+            if has_gps:
+                try:
+                    lon = float(row['gps_lon'])
+                    lat = float(row['gps_lat'])
+                except (ValueError, TypeError):
+                    pass
 
-        # Get datetime (support both 'datetime' and 'timestamp' column names)
-        datetime_val = row[self.datetime_col].squeeze() if self.datetime_col in row.columns else ""
+            # Parse datetime
+            dt_parsed = None
+            if has_datetime:
+                try:
+                    dt_parsed = pd.to_datetime(row[datetime_col])
+                except Exception:
+                    pass
 
-        # Get filename (support both 'file_name' and 'image_path' column names)
-        file_name = row[self.filename_col].squeeze() if self.filename_col in row.columns else ""
+            # Get filename
+            filename = str(row[filename_col]) if has_filename else ""
 
-        return [str(longitude), str(latitude), str(datetime_val), str(file_name)]
+            self._cache[uuid] = (lon, lat, dt_parsed, filename)
 
+        logger.info(f"metadata_verifier cached {len(self._cache)} annotations")
 
-    def convert_query(self, n0, n1):
-        uuid1 = self.node2uuid[n0]
-        uuid2 = self.node2uuid[n1]
-        return (uuid1, self.get_image_metadata(uuid1), uuid2, self.get_image_metadata(uuid2))
+    def _get_cached(self, uuid):
+        """Get pre-cached metadata for a uuid. Returns (lon, lat, datetime, filename)."""
+        return self._cache.get(uuid, (-1.0, -1.0, None, ""))
 
     def __call__(self, query):
         nodes_to_review = []
-        nodes_query = [self.convert_query(n0, n1) for (n0, n1) in query]
 
-        # Thresholds for plausibility (customize as needed)
-        MAX_ZEBRA_SPEED_KMH = 65  # Maximum plausible speed in km/h
+        MAX_ZEBRA_SPEED_KMH = 65
         rejected_count = 0
-        skipped_count = 0
 
-        for (uuid1, meta1, uuid2, meta2) in nodes_query:
-            file1, file2 = meta1[-1], meta2[-1]
+        for (n0, n1) in query:
+            uuid1 = self.node2uuid[n0]
+            uuid2 = self.node2uuid[n1]
+            lon1, lat1, dt1, file1 = self._get_cached(uuid1)
+            lon2, lat2, dt2, file2 = self._get_cached(uuid2)
+
             if file1 == file2:
                 logger.debug(f"Metadata REJECTED ({uuid1[:8]}, {uuid2[:8]}): same image file '{file1}'")
                 rejected_count += 1
                 continue
 
-            # Extract datetimes and locations
-            try:
-                dt1 = pd.to_datetime(meta1[2])
-                dt2 = pd.to_datetime(meta2[2])
-                time_diff_hours = abs((dt1 - dt2).total_seconds() / 3600)
-            except Exception:
-                logger.debug(f"Metadata PLAUSIBLE ({uuid1[:8]}, {uuid2[:8]}): missing datetime data")
+            # Missing datetime → plausible
+            if dt1 is None or dt2 is None:
                 nodes_to_review.append((uuid1, uuid2))
                 continue
 
-            try:
-                lon1, lat1 = float(meta1[0]), float(meta1[1])
-                lon2, lat2 = float(meta2[0]), float(meta2[1])
-            except Exception:
-                logger.debug(f"Metadata PLAUSIBLE ({uuid1[:8]}, {uuid2[:8]}): missing GPS data")
-                nodes_to_review.append((uuid1, uuid2))
-                continue
+            time_diff_hours = abs((dt1 - dt2).total_seconds() / 3600)
 
+            # Missing GPS → plausible
             if lon1 == -1 or lat1 == -1 or lon2 == -1 or lat2 == -1:
                 nodes_to_review.append((uuid1, uuid2))
                 continue
@@ -242,7 +242,7 @@ class metadata_verifier(object):
             else:
                 rejected_count += 1
 
-        if rejected_count > 0 or skipped_count > 0:
-            logger.info(f"Metadata verifier: {rejected_count} rejected (implausible), {skipped_count} skipped (missing data), {len(nodes_to_review)}/{len(query)} plausible")
+        if rejected_count > 0:
+            logger.info(f"Metadata verifier: {rejected_count} rejected (implausible), {len(nodes_to_review)}/{len(query)} plausible")
 
         return nodes_to_review
