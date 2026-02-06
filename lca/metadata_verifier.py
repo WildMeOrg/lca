@@ -139,13 +139,35 @@ class metadata_verifier(object):
         self.uuid2node = {val:key for (key, val) in node2uuid.items()}
         self.id_key = id_key
 
+        # Detect available column names (support multiple naming conventions)
+        cols = set(data_df.columns)
+        self.datetime_col = 'datetime' if 'datetime' in cols else 'timestamp'
+        self.filename_col = 'file_name' if 'file_name' in cols else 'image_path'
+
+        logger.info(f"metadata_verifier using datetime_col='{self.datetime_col}', filename_col='{self.filename_col}'")
+
     def get_image_metadata(self, uuid):
-        # Get the file_name from the dataframe
-        longitude = self.data_df.loc[self.data_df[self.id_key] == uuid, "gps_lat"].squeeze()
-        latitude = self.data_df.loc[self.data_df[self.id_key] == uuid, "gps_lon"].squeeze()
-        datetime = self.data_df.loc[self.data_df[self.id_key] == uuid, "datetime"].squeeze()
-        file_name = self.data_df.loc[self.data_df[self.id_key] == uuid, "file_name"].squeeze()
-        return [str(longitude), str(latitude), str(datetime), str(file_name)]
+        """Get metadata for an annotation UUID.
+
+        Supports both direct annotation metadata and image-joined metadata.
+        Fields: gps_lon, gps_lat, datetime/timestamp, file_name/image_path
+        """
+        row = self.data_df.loc[self.data_df[self.id_key] == uuid]
+        if row.empty:
+            return ["-1", "-1", "", ""]
+
+        # Get GPS coordinates
+        longitude = row["gps_lon"].squeeze() if "gps_lon" in row.columns else -1
+        latitude = row["gps_lat"].squeeze() if "gps_lat" in row.columns else -1
+
+        # Get datetime (support both 'datetime' and 'timestamp' column names)
+        datetime_val = row[self.datetime_col].squeeze() if self.datetime_col in row.columns else ""
+
+        # Get filename (support both 'file_name' and 'image_path' column names)
+        file_name = row[self.filename_col].squeeze() if self.filename_col in row.columns else ""
+
+        return [str(longitude), str(latitude), str(datetime_val), str(file_name)]
+
 
     def convert_query(self, n0, n1):
         uuid1 = self.node2uuid[n0]
