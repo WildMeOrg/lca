@@ -184,10 +184,14 @@ class metadata_verifier(object):
 
         # Thresholds for plausibility (customize as needed)
         MAX_ZEBRA_SPEED_KMH = 65  # Maximum plausible speed in km/h
+        rejected_count = 0
+        skipped_count = 0
 
         for (uuid1, meta1, uuid2, meta2) in nodes_query:
             file1, file2 = meta1[-1], meta2[-1]
             if file1 == file2:
+                logger.debug(f"Metadata REJECTED ({uuid1[:8]}, {uuid2[:8]}): same image file '{file1}'")
+                rejected_count += 1
                 continue
 
             # Extract datetimes and locations
@@ -196,12 +200,16 @@ class metadata_verifier(object):
                 dt2 = pd.to_datetime(meta2[2])
                 time_diff_hours = abs((dt1 - dt2).total_seconds() / 3600)
             except Exception:
+                logger.debug(f"Metadata PLAUSIBLE ({uuid1[:8]}, {uuid2[:8]}): missing datetime data")
+                nodes_to_review.append((uuid1, uuid2))
                 continue
 
             try:
                 lon1, lat1 = float(meta1[0]), float(meta1[1])
                 lon2, lat2 = float(meta2[0]), float(meta2[1])
             except Exception:
+                logger.debug(f"Metadata PLAUSIBLE ({uuid1[:8]}, {uuid2[:8]}): missing GPS data")
+                nodes_to_review.append((uuid1, uuid2))
                 continue
 
             if lon1 == -1 or lat1 == -1 or lon2 == -1 or lat2 == -1:
@@ -221,11 +229,20 @@ class metadata_verifier(object):
             # Avoid division by zero for same timestamp
             if time_diff_hours <= 0.1:
                 plausible = distance_km < 0.1  # 100 meters, basically the same spot
+                if not plausible:
+                    logger.debug(f"Metadata REJECTED ({uuid1[:8]}, {uuid2[:8]}): same time (<0.1h) but {distance_km:.2f}km apart (max 0.1km)")
             else:
                 required_speed = distance_km / time_diff_hours
                 plausible = required_speed <= MAX_ZEBRA_SPEED_KMH
+                if not plausible:
+                    logger.debug(f"Metadata REJECTED ({uuid1[:8]}, {uuid2[:8]}): {distance_km:.1f}km in {time_diff_hours:.1f}h = {required_speed:.1f}km/h (max {MAX_ZEBRA_SPEED_KMH}km/h)")
 
             if plausible:
                 nodes_to_review.append((uuid1, uuid2))
+            else:
+                rejected_count += 1
+
+        if rejected_count > 0 or skipped_count > 0:
+            logger.info(f"Metadata verifier: {rejected_count} rejected (implausible), {skipped_count} skipped (missing data), {len(nodes_to_review)}/{len(query)} plausible")
 
         return nodes_to_review
