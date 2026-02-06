@@ -105,6 +105,10 @@ class MetadataEmbeddings:
     def __getattr__(self, name):
         """Delegate other methods to base embeddings."""
         return getattr(self.base_embeddings, name)
+
+    def get_base(self):
+        """Return the unwrapped base embeddings for threshold computation."""
+        return self.base_embeddings
     
     def get_stats(self, df, filter_key, id_key='uuid'):
         """Get statistics with metadata filtering applied."""
