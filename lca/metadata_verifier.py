@@ -141,8 +141,8 @@ class metadata_verifier(object):
 
     def get_image_metadata(self, uuid):
         # Get the file_name from the dataframe
-        longitude = self.data_df.loc[self.data_df[self.id_key] == uuid, "longitude"].squeeze()
-        latitude = self.data_df.loc[self.data_df[self.id_key] == uuid, "latitude"].squeeze()
+        longitude = self.data_df.loc[self.data_df[self.id_key] == uuid, "gps_lat"].squeeze()
+        latitude = self.data_df.loc[self.data_df[self.id_key] == uuid, "gps_lon"].squeeze()
         datetime = self.data_df.loc[self.data_df[self.id_key] == uuid, "datetime"].squeeze()
         file_name = self.data_df.loc[self.data_df[self.id_key] == uuid, "file_name"].squeeze()
         return [str(longitude), str(latitude), str(datetime), str(file_name)]
