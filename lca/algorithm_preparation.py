@@ -982,6 +982,10 @@ def prepare_stability(common_data, config):
     do_robust_plot = "auto_threshold_plot_path" in config.get("logging", {})
     robust_plot_path = config.get("logging", {}).get("auto_threshold_plot_path", "dist.png")
 
+    # Separate thresholds into direct values and references
+    direct_thresholds = {}  # name -> (embeddings, threshold_spec)
+    reference_thresholds = {}  # name -> (embeddings, reference_name)
+
     for name in classifier_thresholds:
         if name not in common_data['embeddings_dict']:
             continue
@@ -990,38 +994,49 @@ def prepare_stability(common_data, config):
             embeddings = embeddings()
 
         threshold = classifier_thresholds[name]
-        if isinstance(threshold, str):
-            if "auto" in threshold:
-                import re
-                match = re.match(r'auto\((\d+\.?\d*)\)', threshold)
-                threshold_fraction = float(match.group(1)) if match else 0.15
+        # Check if it's a reference to another classifier (string that's not 'auto(...)')
+        if isinstance(threshold, str) and "auto" not in threshold:
+            reference_thresholds[name] = (embeddings, threshold)
+        else:
+            direct_thresholds[name] = (embeddings, threshold)
 
-                unfiltered_embeddings_dict = common_data.get('unfiltered_embeddings_dict', {})
-                if name in unfiltered_embeddings_dict:
-                    thresh_embeddings = unfiltered_embeddings_dict[name]
-                    if isinstance(thresh_embeddings, types.FunctionType):
-                        thresh_embeddings = thresh_embeddings()
-                else:
-                    thresh_embeddings = embeddings
+    # First pass: process direct thresholds (numbers and auto())
+    for name, (embeddings, threshold) in direct_thresholds.items():
+        if isinstance(threshold, str) and "auto" in threshold:
+            import re
+            match = re.match(r'auto\((\d+\.?\d*)\)', threshold)
+            threshold_fraction = float(match.group(1)) if match else 0.15
 
-                if hasattr(embeddings, 'get_base'):
-                    thresh_embeddings = embeddings.get_base()
+            unfiltered_embeddings_dict = common_data.get('unfiltered_embeddings_dict', {})
+            if name in unfiltered_embeddings_dict:
+                thresh_embeddings = unfiltered_embeddings_dict[name]
+                if isinstance(thresh_embeddings, types.FunctionType):
+                    thresh_embeddings = thresh_embeddings()
+            else:
+                thresh_embeddings = embeddings
 
-                threshold = robust_gmm_find_threshold(
-                    np.array(thresh_embeddings.get_all_scores()),
-                    entropy_alpha=1-threshold_fraction,
-                    verbose=True,
-                    print_func=logger.info,
-                    plot_path=robust_plot_path
-                )
-            elif threshold in classifier_units:
-                classifier = classifier_units[threshold]
-                classifier_units[name] = classifier
-                continue
+            if hasattr(embeddings, 'get_base'):
+                thresh_embeddings = embeddings.get_base()
+
+            threshold = robust_gmm_find_threshold(
+                np.array(thresh_embeddings.get_all_scores()),
+                entropy_alpha=1-threshold_fraction,
+                verbose=True,
+                print_func=logger.info,
+                plot_path=robust_plot_path
+            )
 
         classifier = ThresholdBasedClassifier(threshold)
         logger.info(f"Created threshold-based classifier for {name} with threshold {threshold}")
         classifier_units[name] = (embeddings, classifier)
+
+    # Second pass: process reference thresholds
+    for name, (embeddings, ref_name) in reference_thresholds.items():
+        if ref_name in classifier_units:
+            classifier_units[name] = (embeddings, classifier_units[ref_name][1])
+            logger.info(f"Created threshold-based classifier for {name} referencing {ref_name}")
+        else:
+            logger.warning(f"Skipping {name}: referenced classifier '{ref_name}' not found")
 
     for name in verifier_names:
         if 'human' in name:
