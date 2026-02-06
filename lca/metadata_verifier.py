@@ -242,7 +242,4 @@ class metadata_verifier(object):
             else:
                 rejected_count += 1
 
-        if rejected_count > 0:
-            logger.info(f"Metadata verifier: {rejected_count} rejected (implausible), {len(nodes_to_review)}/{len(query)} plausible")
-
         return nodes_to_review
