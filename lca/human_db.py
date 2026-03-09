@@ -1,6 +1,7 @@
 import logging
 import sqlite3
 import os
+from datetime import datetime
 from pathlib import Path
 
 logger = logging.getLogger("lca")
@@ -166,12 +167,21 @@ class human_db(object):
                 sent_results = [(r1, uuid1, uuid2, decision) for (r1, uuid1, uuid2, decision) in sent_results if uuid1 in self.uuid2node and uuid2 in self.uuid2node]
                 logger.debug(f"Filtered to {len(sent_results)} sent results with valid UUIDs")
 
-            # Update checked to sent
+                # Stamp read_at for re-read sent results
+                if sent_results:
+                    now_sent = datetime.now().isoformat()
+                    cursor.executemany(
+                        "UPDATE image_verification SET read_at=? WHERE id=?",
+                        [(now_sent, res[0]) for res in sent_results]
+                    )
+
+            # Update checked to sent and stamp read_at
+            now = datetime.now().isoformat()
             if checked_results:
                 logger.info(f"Updating {len(checked_results)} checked results to sent status")
                 cursor.executemany(
-                    "UPDATE image_verification SET status='sent' WHERE id=?",
-                    [(res[0],) for res in checked_results]
+                    "UPDATE image_verification SET status='sent', read_at=? WHERE id=?",
+                    [(now, res[0]) for res in checked_results]
                 )
                 logger.debug(f"Successfully updated status for {len(checked_results)} results")
 
