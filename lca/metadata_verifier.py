@@ -191,6 +191,7 @@ class metadata_verifier(object):
         nodes_to_review = []
 
         MAX_ZEBRA_SPEED_KMH = 65
+        MAX_DISTANCE_KM = 70
         rejected_count = 0
 
         for (n0, n1) in query:
@@ -225,6 +226,12 @@ class metadata_verifier(object):
             a = math.sin(delta_phi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda/2)**2
             c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
             distance_km = R * c
+
+            # Reject pairs that are too far apart regardless of time
+            if distance_km > MAX_DISTANCE_KM:
+                logger.debug(f"Metadata REJECTED ({uuid1[:8]}, {uuid2[:8]}): {distance_km:.1f}km apart (max {MAX_DISTANCE_KM}km)")
+                rejected_count += 1
+                continue
 
             # Avoid division by zero for same timestamp
             if time_diff_hours <= 0.1:
