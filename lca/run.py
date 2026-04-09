@@ -121,14 +121,14 @@ def plot_edge_score_histograms(histogram_data_list, labels, output_path, bins=30
 def get_initial_edges(common_data, config):
     """Get initial edges in unified format.
 
-    Supports threshold-based initialization where edges are selected based on:
+    Supports multiple initialization verifiers (edges collected from each in order)
+    and threshold-based initialization where edges are selected based on:
     - top-k neighbors (existing)
     - random proportion (existing)
     - certain positives: score > classifier_threshold + upper_margin
     - certain negatives: score < classifier_threshold - lower_margin
     """
-    verifier_name = common_data['verifier_name']
-    verifier_embeddings = common_data['embeddings_dict'][verifier_name]
+    init_verifiers = common_data.get('init_verifiers', [common_data['verifier_name']])
 
     # Get algorithm parameters
     algorithm_params = config.get('algorithm', {})
@@ -152,18 +152,28 @@ def get_initial_edges(common_data, config):
             upper_threshold = classifier_threshold + upper_margin
             logger.info(f"Using upper_threshold={upper_threshold:.4f} (classifier={classifier_threshold:.4f} + margin={upper_margin})")
 
-    # Get raw edges with threshold-based selection
-    raw_edges = list(verifier_embeddings.get_edges(
-        target_edges=common_data['target_edges'],
-        topk=common_data['initial_topk'],
-        botk=common_data.get('initial_botk', 0),
-        target_proportion=common_data['target_proportion'],
-        lower_threshold=lower_threshold,
-        upper_threshold=upper_threshold
-    ))
-    raw_edges = [(*n, verifier_name) for n in raw_edges]
+    all_edges = []
+    seen_pairs = set()
+    for verifier_name in init_verifiers:
+        verifier_embeddings = common_data['embeddings_dict'][verifier_name]
+        raw_edges = list(verifier_embeddings.get_edges(
+            target_edges=common_data['target_edges'],
+            topk=common_data['initial_topk'],
+            botk=common_data.get('initial_botk', 0),
+            target_proportion=common_data['target_proportion'],
+            lower_threshold=lower_threshold,
+            upper_threshold=upper_threshold
+        ))
+        new_count = 0
+        for edge in raw_edges:
+            pair = (edge[0], edge[1])
+            if pair not in seen_pairs:
+                seen_pairs.add(pair)
+                all_edges.append((*edge, verifier_name))
+                new_count += 1
+        logger.info(f"Init verifier '{verifier_name}': {len(raw_edges)} edges, {new_count} new")
 
-    return raw_edges
+    return all_edges
 
 
 def get_human_responses(requested_edges, common_data):
@@ -239,8 +249,13 @@ def run(config):
 
     try:
         # Get initial edges
+        init_verifiers = common_data.get('init_verifiers', [common_data['verifier_name']])
+        logger.info(f"Initializing graph using verifiers: {init_verifiers}")
+        for iv_name in init_verifiers:
+            iv_emb = common_data['embeddings_dict'][iv_name]
+            if hasattr(iv_emb, 'k'):
+                logger.info(f"K-means found {iv_emb.k} clusters")
         initial_edges = get_initial_edges(common_data, config)
-        # print("initial", initial_edges[0])
         logger.info(f"Starting with {len(initial_edges)} initial edges")
         # Start algorithm
         requested_edges = algorithm.step(initial_edges)

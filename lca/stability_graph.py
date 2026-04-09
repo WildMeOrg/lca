@@ -50,6 +50,7 @@ class StabilityCandidate:
     candidate_type: str  # "INTERNAL" or "EXTERNAL"
     stability: float
     review_edge: Tuple[int, int]  # Edge to present to human
+    structural_impact: float = 1.0  # min(subtree_left, subtree_right) for splits, min(|pcc_a|, |pcc_b|) for merges
     # For INTERNAL: the unstable pair
     node_pair: Optional[Tuple[int, int]] = None
     pcc_id: Optional[int] = None
@@ -76,6 +77,12 @@ class StabilityGraph:
         # MST forest - built explicitly when needed, no caching
         self._mst_forest: Optional[nx.Graph] = None
 
+        # Incremental edge label counts (avoids iterating all edges)
+        self._edge_counts = {'positive': 0, 'positive_inactive': 0, 'negative': 0}
+
+        # Track positive-inactive edges for fast external stability computation
+        self._pos_inactive_edges: Set[Tuple[int, int]] = set()
+
     def add_node(self, node_id: int):
         if node_id not in self.G:
             self.G.add_node(node_id)
@@ -91,6 +98,8 @@ class StabilityGraph:
         if self.G.has_edge(u, v):
             old_data = self.G[u][v].get('data')
             if old_data:
+                # Decrement old label count
+                self._decrement_edge_count(old_data.label)
                 # If label or confidence changed significantly, may need to reactivate
                 if old_data.label == EdgeLabel.POSITIVE_INACTIVE:
                     if label == EdgeLabel.POSITIVE:
@@ -105,11 +114,20 @@ class StabilityGraph:
                                       score=score, ranker=ranker)
                 self.G[u][v]['data'] = new_data
             else:
-                self.G[u][v]['data'] = EdgeData(label=label, confidence=confidence,
+                new_data = EdgeData(label=label, confidence=confidence,
                                                score=score, ranker=ranker)
+                self.G[u][v]['data'] = new_data
         else:
-            self.G.add_edge(u, v, data=EdgeData(label=label, confidence=confidence,
-                                               score=score, ranker=ranker))
+            new_data = EdgeData(label=label, confidence=confidence,
+                                               score=score, ranker=ranker)
+            self.G.add_edge(u, v, data=new_data)
+        # Increment new label count and maintain pos-inactive tracking
+        self._increment_edge_count(label)
+        key = (min(u, v), max(u, v))
+        if label == EdgeLabel.POSITIVE_INACTIVE:
+            self._pos_inactive_edges.add(key)
+        else:
+            self._pos_inactive_edges.discard(key)
         self._pcc_cache_valid = False
 
     def get_edge(self, u: int, v: int) -> Optional[EdgeData]:
@@ -125,6 +143,22 @@ class StabilityGraph:
             data = self.G[u][v].get('data')
             return data.confidence if data else 0.0
         return 0.0
+
+    def _increment_edge_count(self, label: EdgeLabel):
+        if label == EdgeLabel.POSITIVE:
+            self._edge_counts['positive'] += 1
+        elif label == EdgeLabel.POSITIVE_INACTIVE:
+            self._edge_counts['positive_inactive'] += 1
+        elif label == EdgeLabel.NEGATIVE:
+            self._edge_counts['negative'] += 1
+
+    def _decrement_edge_count(self, label: EdgeLabel):
+        if label == EdgeLabel.POSITIVE:
+            self._edge_counts['positive'] -= 1
+        elif label == EdgeLabel.POSITIVE_INACTIVE:
+            self._edge_counts['positive_inactive'] -= 1
+        elif label == EdgeLabel.NEGATIVE:
+            self._edge_counts['negative'] -= 1
 
     def deactivate_positive(self, edge: Tuple[int, int], deactivator: Tuple[int, int] = None):
         """
@@ -144,8 +178,11 @@ class StabilityGraph:
             logger.warning(f"Cannot deactivate non-positive edge ({u}, {v}) with label {edge_data.label}")
             return
 
+        self._edge_counts['positive'] -= 1
+        self._edge_counts['positive_inactive'] += 1
         edge_data.label = EdgeLabel.POSITIVE_INACTIVE
         edge_data.deactivator = deactivator
+        self._pos_inactive_edges.add((min(u, v), max(u, v)))
         self._pcc_cache_valid = False
 
     def reactivate(self, u: int, v: int):
@@ -155,8 +192,11 @@ class StabilityGraph:
 
         edge_data = self.G[u][v].get('data')
         if edge_data and edge_data.label == EdgeLabel.POSITIVE_INACTIVE:
+            self._edge_counts['positive_inactive'] -= 1
+            self._edge_counts['positive'] += 1
             edge_data.label = EdgeLabel.POSITIVE
             edge_data.deactivator = None
+            self._pos_inactive_edges.discard((min(u, v), max(u, v)))
             self._pcc_cache_valid = False
 
     def _invalidate_cache(self):
@@ -206,6 +246,48 @@ class StabilityGraph:
 
         # Build MST forest (one MST per connected component)
         self._mst_forest = nx.maximum_spanning_tree(self._mst_forest, weight='weight')
+
+    def sparsify_pccs(self) -> int:
+        """
+        Sparsify each PCC to its Maximum Spanning Tree.
+
+        For each PCC, keeps only the MST edges as positive and deactivates
+        all other positive edges (-> positive-inactive). This ensures PCCs
+        are tree-structured, so make_zero_stable converges in one pass.
+
+        Should be called once after initial graph construction (before Phase 0).
+
+        Returns: Number of edges deactivated.
+        """
+        self._ensure_pcc_cache()
+
+        # Build MST of positive edges
+        self._build_mst_forest()
+        mst_edges = set()
+        for u, v in self._mst_forest.edges():
+            mst_edges.add((min(u, v), max(u, v)))
+
+        # Deactivate all positive edges NOT in the MST
+        deactivations = 0
+        for u, v, data in list(self.G.edges(data=True)):
+            edge_data = data.get('data')
+            if edge_data and edge_data.label == EdgeLabel.POSITIVE:
+                key = (min(u, v), max(u, v))
+                if key not in mst_edges:
+                    edge_data.label = EdgeLabel.POSITIVE_INACTIVE
+                    edge_data.deactivator = None
+                    self._pos_inactive_edges.add(key)
+                    deactivations += 1
+
+        if deactivations > 0:
+            self._edge_counts['positive'] -= deactivations
+            self._edge_counts['positive_inactive'] += deactivations
+            self._pcc_cache_valid = False
+
+        logger.info(f"Sparsified PCCs: kept {len(mst_edges)} MST edges, "
+                    f"deactivated {deactivations} non-MST positive edges")
+
+        return deactivations
 
     def get_pccs(self) -> List[Set[int]]:
         self._ensure_pcc_cache()
@@ -485,11 +567,14 @@ class StabilityGraph:
                 if len(pcc) < 2:
                     continue
 
-                # Collect negative edges within this PCC
+                # Collect negative edges within this PCC using pair iteration
+                # (O(N^2) with N = PCC size, much faster than iterating all neighbors)
+                pcc_list = sorted(pcc)
                 negative_edges = []
-                for u in pcc:
-                    for v in self.G.neighbors(u):
-                        if v in pcc and u < v:
+                for i in range(len(pcc_list)):
+                    for j in range(i + 1, len(pcc_list)):
+                        u, v = pcc_list[i], pcc_list[j]
+                        if self.G.has_edge(u, v):
                             edge_data = self.G[u][v].get('data')
                             if edge_data and edge_data.label == EdgeLabel.NEGATIVE:
                                 negative_edges.append((u, v, edge_data.confidence))
@@ -693,11 +778,10 @@ class StabilityGraph:
                 # stability = MSP - neg_conf
                 stability = min_conf - neg_conf
                 if stability < alpha:
-                    # Per PDF 3(a): prefer negative edge for review
                     candidates.append(StabilityCandidate(
                         candidate_type="INTERNAL",
                         stability=stability,
-                        review_edge=(u, v),  # The negative edge
+                        review_edge=(u, v),
                         node_pair=(u, v),
                         pcc_id=pcc_id
                     ))
@@ -748,7 +832,7 @@ class StabilityGraph:
         candidates.sort(key=lambda c: c.stability)
         return candidates
 
-    def select_non_conflicting_candidates_lazy(self, alpha: float, max_batch_size: int = 500) -> List[Tuple[int, int, float]]:
+    def select_non_conflicting_candidates_lazy(self, alpha: float, max_batch_size: int = 500, structural_weight: float = 0.0, confidence_weight: float = 0.0, sampling_temperature: float = 0.0, verified_edges: Optional[Set[Tuple[int, int]]] = None, unverified_threshold: float = 0.0, pcc_separation_strength: Optional[Dict[int, float]] = None) -> List[Tuple[int, int, float]]:
         """
         Lazily generate and select non-conflicting candidates for parallel review.
         Stops early once PCCs are saturated to avoid wasting time on candidates we won't use.
@@ -756,6 +840,10 @@ class StabilityGraph:
         Args:
             alpha: Target stability threshold
             max_batch_size: Maximum number of edges to select (prevents exhausting review budget)
+            verified_edges: Set of (min(u,v), max(u,v)) edge keys that have been human-reviewed
+            unverified_threshold: Generate unverified candidates for MST edges below this confidence
+            pcc_separation_strength: Dict mapping pcc_id -> separation strength (NIS n_hat analog).
+                If provided, UNVERIFIED_NEG candidates are scored by PCC isolation (lower = higher priority).
 
         Returns: List of (u, v, score) tuples for selected edges
         """
@@ -764,26 +852,78 @@ class StabilityGraph:
         # Build MST forest once for internal candidate generation
         self._build_mst_forest()
 
-        # Step 1: Generate all internal candidates
-        internal_candidates = []
+        # Step 1: Generate internal candidates and unverified candidates per PCC
+        candidates = []
+        unverified_candidates = []
+        _verified = verified_edges or set()
+        n_internal = 0
+        n_external = 0
+
         for pcc_id, pcc in enumerate(self._pccs):
             if len(pcc) < 2:
-                continue
-
-            negative_edges = []
-            for u in pcc:
-                for v in self.G.neighbors(u):
-                    if v in pcc and u < v:
-                        edge_data = self.G[u][v].get('data')
-                        if edge_data and edge_data.label == EdgeLabel.NEGATIVE:
-                            negative_edges.append((u, v, edge_data.confidence))
-
-            if not negative_edges:
                 continue
 
             # Extract MST for this PCC from the forest
             mst = self._mst_forest.subgraph(pcc).copy()
             if mst.number_of_edges() == 0:
+                continue
+
+            # Root MST and compute subtree sizes for structural impact (O(N) per PCC)
+            n_pcc = len(pcc)
+            mst_root = next(iter(pcc))
+            mst_parent = {}
+            mst_order = []
+            stack = [(mst_root, None)]
+            while stack:
+                node, par = stack.pop()
+                mst_parent[node] = par
+                mst_order.append(node)
+                for nbr in mst.neighbors(node):
+                    if nbr != par:
+                        stack.append((nbr, node))
+            mst_subtree_size = {node: 1 for node in mst_order}
+            for node in reversed(mst_order):
+                if mst_parent[node] is not None:
+                    mst_subtree_size[mst_parent[node]] += mst_subtree_size[node]
+
+            # Collect unverified MST edges below threshold
+            if unverified_threshold > 0:
+                for a, b, attr in mst.edges(data=True):
+                    edge_key = (min(a, b), max(a, b))
+                    if edge_key in _verified:
+                        continue
+                    conf = attr.get('weight', 1.0)
+                    if conf < unverified_threshold:
+                        # Structural impact: size of smaller subtree if this edge were cut
+                        if mst_parent.get(b) == a:
+                            child = b
+                        elif mst_parent.get(a) == b:
+                            child = a
+                        else:
+                            child = b
+                        child_size = mst_subtree_size.get(child, 1)
+                        impact = float(min(child_size, n_pcc - child_size))
+                        unverified_candidates.append(StabilityCandidate(
+                            candidate_type="UNVERIFIED",
+                            stability=conf,  # use confidence as sort key (lower = higher priority)
+                            review_edge=(a, b),
+                            structural_impact=max(impact, 1.0),
+                            node_pair=(a, b),
+                            pcc_id=pcc_id
+                        ))
+
+            # Find intra-PCC negative edges for internal instability candidates
+            pcc_list = sorted(pcc)
+            negative_edges = []
+            for i in range(len(pcc_list)):
+                for j in range(i + 1, len(pcc_list)):
+                    u, v = pcc_list[i], pcc_list[j]
+                    if self.G.has_edge(u, v):
+                        edge_data = self.G[u][v].get('data')
+                        if edge_data and edge_data.label == EdgeLabel.NEGATIVE:
+                            negative_edges.append((u, v, edge_data.confidence))
+
+            if not negative_edges:
                 continue
 
             # Precompute all paths in this PCC's MST (avoids repeated BFS)
@@ -799,98 +939,221 @@ class StabilityGraph:
                     continue
 
                 min_conf = float('inf')
+                min_edge = None
                 for i in range(len(path) - 1):
                     a, b = path[i], path[i + 1]
                     conf = mst[a][b]['weight']
                     if conf < min_conf:
                         min_conf = conf
+                        min_edge = (a, b)
 
                 stability = min_conf - neg_conf
                 if stability < alpha:
-                    internal_candidates.append(StabilityCandidate(
+                    # Compute structural impact: size of smaller subtree if weakest edge is cut
+                    impact = 1.0
+                    if min_edge is not None:
+                        a, b = min_edge
+                        if mst_parent.get(b) == a:
+                            child = b
+                        elif mst_parent.get(a) == b:
+                            child = a
+                        else:
+                            child = b
+                        child_size = mst_subtree_size.get(child, 1)
+                        impact = float(min(child_size, n_pcc - child_size))
+
+                    candidates.append(StabilityCandidate(
                         candidate_type="INTERNAL",
                         stability=stability,
                         review_edge=(u, v),
+                        structural_impact=max(impact, 1.0),
                         node_pair=(u, v),
                         pcc_id=pcc_id
                     ))
 
-        # Step 2: Generate external candidate data (PCC pair -> stability, edge)
-        # Build this once, then filter by occupied PCCs during selection
-        pcc_pair_neg_edges: Dict[Tuple[int, int], Tuple[float, Tuple[int, int]]] = {}
+        # Step 2: Generate external candidates.
+        # Per PDF: external_stability = max_neg - max_pos_inactive for ANY
+        # PCC pair with a negative edge (not just those with pos-inactive edges).
+        pcc_pair_max_neg: Dict[Tuple[int, int], Tuple[float, Tuple[int, int]]] = {}
         pcc_pair_pos_inactive: Dict[Tuple[int, int], float] = {}
 
-        for u, v, edge_data in self.G.edges(data='data'):
-            if not edge_data:
+        for u, v, attr in self.G.edges(data=True):
+            ed = attr.get('data')
+            if ed is None:
                 continue
-
             pcc_u = self._node_to_pcc.get(u)
             pcc_v = self._node_to_pcc.get(v)
-
             if pcc_u is None or pcc_v is None or pcc_u == pcc_v:
                 continue
-
             pcc_pair = (min(pcc_u, pcc_v), max(pcc_u, pcc_v))
-
-            if edge_data.label == EdgeLabel.NEGATIVE:
-                current = pcc_pair_neg_edges.get(pcc_pair)
-                if current is None or edge_data.confidence > current[0]:
-                    pcc_pair_neg_edges[pcc_pair] = (edge_data.confidence, (u, v))
-            elif edge_data.label == EdgeLabel.POSITIVE_INACTIVE:
+            if ed.label == EdgeLabel.NEGATIVE:
+                current = pcc_pair_max_neg.get(pcc_pair)
+                if current is None or ed.confidence > current[0]:
+                    pcc_pair_max_neg[pcc_pair] = (ed.confidence, (u, v))
+            elif ed.label == EdgeLabel.POSITIVE_INACTIVE:
                 current = pcc_pair_pos_inactive.get(pcc_pair, 0.0)
-                pcc_pair_pos_inactive[pcc_pair] = max(current, edge_data.confidence)
+                pcc_pair_pos_inactive[pcc_pair] = max(current, ed.confidence)
 
-        # Step 3: Merge internal and external candidates, sort by stability
-        all_candidates = list(internal_candidates)
-
-        for pcc_pair, (max_neg_conf, max_neg_edge) in pcc_pair_neg_edges.items():
+        # Step 3: Build external candidates
+        # Skip candidates whose review edge is already verified (exhausted)
+        n_internal = len(candidates)
+        for pcc_pair, (max_neg_conf, max_neg_edge) in pcc_pair_max_neg.items():
+            edge_key = (min(max_neg_edge[0], max_neg_edge[1]), max(max_neg_edge[0], max_neg_edge[1]))
+            if edge_key in _verified:
+                continue
             max_pos_inactive = pcc_pair_pos_inactive.get(pcc_pair, 0.0)
             stability = max_neg_conf - max_pos_inactive
 
             if stability < alpha:
-                all_candidates.append(StabilityCandidate(
+                pcc_a_id, pcc_b_id = pcc_pair
+                impact = float(min(len(self._pccs[pcc_a_id]), len(self._pccs[pcc_b_id])))
+                candidates.append(StabilityCandidate(
                     candidate_type="EXTERNAL",
                     stability=stability,
                     review_edge=max_neg_edge,
+                    structural_impact=max(impact, 1.0),
                     pcc_pair=pcc_pair
                 ))
 
-        all_candidates.sort(key=lambda c: c.stability)
+        n_external = len(candidates) - n_internal
 
-        logger.info(f"Generated {len(all_candidates)} candidates ({len(internal_candidates)} internal, {len(all_candidates)-len(internal_candidates)} external)")
-
-        # Step 4: Select candidates with differentiated constraints
-        # INTERNAL: max 1 per PCC (conflicting stability signals) - select ALL
-        # EXTERNAL: no per-PCC limit, but cap total external edges for iterative refinement
-        batch = []
-        internal_pccs_used = set()
-        num_internal = 0
-        num_external = 0
-
-        for candidate in all_candidates:
-            if candidate.candidate_type == "INTERNAL":
-                # Strict: only 1 internal edge per PCC (select all internal)
-                if candidate.pcc_id in internal_pccs_used:
+        # Step 3a: Generate unverified negative candidates (potential merges)
+        # Low-confidence negative edges between PCCs that haven't been human-reviewed
+        # NIS-style: if pcc_separation_strength is provided, score by PCC isolation
+        # (min separation strength of the two PCCs) rather than individual edge confidence.
+        # This biases review toward edges connecting weakly-separated PCCs — the ones
+        # most likely to be incorrect negatives hiding real merges.
+        if unverified_threshold > 0:
+            for u, v, attr in self.G.edges(data=True):
+                edge_data = attr.get('data')
+                if edge_data is None or edge_data.label != EdgeLabel.NEGATIVE:
                     continue
-                internal_pccs_used.add(candidate.pcc_id)
-                num_internal += 1
+                edge_key = (min(u, v), max(u, v))
+                if edge_key in _verified:
+                    continue
+                if edge_data.confidence >= unverified_threshold:
+                    continue
+                # Must be cross-PCC
+                pcc_u = self._node_to_pcc.get(u)
+                pcc_v = self._node_to_pcc.get(v)
+                if pcc_u is None or pcc_v is None or pcc_u == pcc_v:
+                    continue
+                impact = float(min(len(self._pccs[pcc_u]), len(self._pccs[pcc_v])))
 
-                u, v = candidate.review_edge
-                edge_data = self.get_edge(u, v)
-                score = edge_data.score if edge_data else 0.0
-                batch.append((u, v, score))
+                # NIS-style scoring: use min PCC separation strength (lower = more isolated)
+                if pcc_separation_strength is not None:
+                    score_key = min(
+                        pcc_separation_strength.get(pcc_u, 0.0),
+                        pcc_separation_strength.get(pcc_v, 0.0)
+                    )
+                else:
+                    score_key = edge_data.confidence
+
+                unverified_candidates.append(StabilityCandidate(
+                    candidate_type="UNVERIFIED_NEG",
+                    stability=score_key,  # lower = higher priority (more isolated or less confident)
+                    review_edge=(u, v),
+                    structural_impact=max(impact, 1.0),
+                    pcc_pair=(min(pcc_u, pcc_v), max(pcc_u, pcc_v))
+                ))
+
+        n_unverified = len(unverified_candidates)
+
+        # Sort instability candidates by combined instability + structural impact + confidence
+        # Look up review edge confidence for each candidate (lower confidence = more likely wrong)
+        def _get_review_edge_confidence(candidate):
+            u, v = candidate.review_edge
+            ed = self.get_edge(u, v)
+            return ed.confidence if ed else 0.5
+
+        if (structural_weight > 0 or confidence_weight > 0) and len(candidates) > 1:
+            stabs = [c.stability for c in candidates]
+            s_min, s_max = min(stabs), max(stabs)
+            s_range = s_max - s_min if s_max > s_min else 1.0
+
+            if structural_weight > 0:
+                impacts = [c.structural_impact for c in candidates]
+                i_min, i_max = min(impacts), max(impacts)
+                i_range = i_max - i_min if i_max > i_min else 1.0
             else:
-                # External edges: limit total count to prevent exhausting review budget
-                if num_external >= max_batch_size:
-                    continue
-                num_external += 1
+                i_min = i_range = 1.0
 
-                u, v = candidate.review_edge
-                edge_data = self.get_edge(u, v)
-                score = edge_data.score if edge_data else 0.0
-                batch.append((u, v, score))
+            if confidence_weight > 0:
+                confs = [_get_review_edge_confidence(c) for c in candidates]
+                conf_min, conf_max = min(confs), max(confs)
+                conf_range = conf_max - conf_min if conf_max > conf_min else 1.0
+            else:
+                conf_min = conf_range = 1.0
 
-        logger.info(f"Selected {len(batch)} edges ({num_internal} internal [max 1/PCC], {num_external} external [max {max_batch_size}])")
+            def _sort_key(c):
+                score = (c.stability - s_min) / s_range
+                if structural_weight > 0:
+                    score -= structural_weight * (c.structural_impact - i_min) / i_range
+                if confidence_weight > 0:
+                    # Lower confidence = more likely wrong = higher priority (lower sort key)
+                    conf = _get_review_edge_confidence(c)
+                    score -= confidence_weight * (1.0 - (conf - conf_min) / conf_range)
+                return score
+
+            candidates.sort(key=_sort_key)
+        else:
+            candidates.sort(key=lambda c: c.stability)
+
+        # Sort unverified candidates by confidence ascending (weakest first)
+        unverified_candidates.sort(key=lambda c: c.stability)
+
+        n_unverified = len(unverified_candidates)
+        n_unverified_pos = sum(1 for c in unverified_candidates if c.candidate_type == "UNVERIFIED")
+        n_unverified_neg = sum(1 for c in unverified_candidates if c.candidate_type == "UNVERIFIED_NEG")
+        logger.info(f"Generated {len(candidates)} instability candidates "
+                    f"({n_internal} internal/split, {n_external} external/merge), "
+                    f"{n_unverified} unverified ({n_unverified_pos} pos/split, {n_unverified_neg} neg/merge)")
+
+        # Step 5: Select candidates, 1 per PCC
+        # Fill instability candidates first, then unverified candidates for remaining slots
+        batch = []
+        batch_types = []  # Track candidate type for each selected edge
+        pccs_used = set()
+
+        def _add_candidate(candidate):
+            if candidate.pcc_id is not None and candidate.pcc_id in pccs_used:
+                return False
+            u, v = candidate.review_edge
+            if candidate.pcc_id is not None:
+                pccs_used.add(candidate.pcc_id)
+            edge_data = self.get_edge(u, v)
+            score = edge_data.score if edge_data else 0.0
+            batch.append((u, v, score))
+            batch_types.append(candidate.candidate_type)
+            return True
+
+        # Instability candidates first (highest priority)
+        for candidate in candidates:
+            if len(batch) >= max_batch_size:
+                break
+            _add_candidate(candidate)
+
+        n_instability_selected = len(batch)
+
+        # Fill remaining with unverified candidates (guaranteed slots + any leftover)
+        for candidate in unverified_candidates:
+            if len(batch) >= max_batch_size:
+                break
+            _add_candidate(candidate)
+
+        n_unverified_selected = len(batch) - n_instability_selected
+
+        # Detailed breakdown of selected candidates
+        from collections import Counter
+        type_counts = Counter(batch_types)
+        logger.info(f"Selected {len(batch)} edges: "
+                    f"{type_counts.get('INTERNAL', 0)} INTERNAL, "
+                    f"{type_counts.get('EXTERNAL', 0)} EXTERNAL, "
+                    f"{type_counts.get('UNVERIFIED', 0)} UNVERIFIED, "
+                    f"{type_counts.get('UNVERIFIED_NEG', 0)} UNVERIFIED_NEG")
+
+        # Store batch_types for caller to use in post-review analysis
+        self._last_batch_types = batch_types
         return batch
 
     def apply_human_review(self, u: int, v: int, human_agrees: bool, ch: float):
@@ -906,8 +1169,14 @@ class StabilityGraph:
 
         edge_data = self.G[u][v]['data']
 
+        old_label = edge_data.label
+        edge_data.ranker = 'human'
+
         if human_agrees:
             edge_data.confidence = min(1.0, edge_data.confidence + ch)
+            # Re-activate positive-inactive edges when human confirms they're positive
+            if edge_data.label == EdgeLabel.POSITIVE_INACTIVE:
+                edge_data.label = EdgeLabel.POSITIVE
         else:
             edge_data.confidence -= ch
             if edge_data.confidence < 0:
@@ -920,6 +1189,46 @@ class StabilityGraph:
                     edge_data.label = EdgeLabel.NEGATIVE
                 edge_data.confidence = abs(edge_data.confidence)
 
+        # Update edge counts and pos-inactive tracking if label changed
+        if edge_data.label != old_label:
+            self._decrement_edge_count(old_label)
+            self._increment_edge_count(edge_data.label)
+            key = (min(u, v), max(u, v))
+            if edge_data.label == EdgeLabel.POSITIVE_INACTIVE:
+                self._pos_inactive_edges.add(key)
+            elif old_label == EdgeLabel.POSITIVE_INACTIVE:
+                self._pos_inactive_edges.discard(key)
+
+        self._invalidate_cache()
+
+    def apply_ground_truth_review(self, u: int, v: int, is_positive: bool):
+        """
+        Apply a ground-truth human review: directly set the edge label.
+
+        Unlike apply_human_review which uses confidence arithmetic,
+        this sets the label definitively with confidence 1.0.
+        Used during VST verification where human reviews are authoritative.
+        """
+        if not self.G.has_edge(u, v):
+            return
+
+        edge_data = self.G[u][v]['data']
+        old_label = edge_data.label
+
+        new_label = EdgeLabel.POSITIVE if is_positive else EdgeLabel.NEGATIVE
+        edge_data.label = new_label
+        edge_data.confidence = 1.0
+        edge_data.ranker = 'human'
+
+        if edge_data.label != old_label:
+            self._decrement_edge_count(old_label)
+            self._increment_edge_count(edge_data.label)
+            key = (min(u, v), max(u, v))
+            if edge_data.label == EdgeLabel.POSITIVE_INACTIVE:
+                self._pos_inactive_edges.add(key)
+            elif old_label == EdgeLabel.POSITIVE_INACTIVE:
+                self._pos_inactive_edges.discard(key)
+
         self._invalidate_cache()
 
     def get_clustering(self) -> Tuple[Dict[int, Set[int]], Dict[int, int]]:
@@ -930,48 +1239,45 @@ class StabilityGraph:
         return cluster_dict, node2cid
 
     def get_graph_stats(self) -> Dict[str, Any]:
-        """Get statistics about the current graph state."""
-        self._ensure_pcc_cache()
+        """Get statistics about the current graph state.
 
-        edge_counts = {'positive': 0, 'positive_inactive': 0, 'negative': 0}
-        for _, _, data in self.G.edges(data=True):
-            edge_data = data.get('data')
-            if edge_data:
-                if edge_data.label == EdgeLabel.POSITIVE:
-                    edge_counts['positive'] += 1
-                elif edge_data.label == EdgeLabel.POSITIVE_INACTIVE:
-                    edge_counts['positive_inactive'] += 1
-                elif edge_data.label == EdgeLabel.NEGATIVE:
-                    edge_counts['negative'] += 1
+        Optimized to avoid iterating all edges (which can be 10M+).
+        - Edge counts: maintained incrementally
+        - Internal stability: iterates PCC node pairs (O(N^2) per PCC, N small)
+        - External stability: iterates only positive-inactive edges (O(small) vs O(10M))
+        """
+        self._ensure_pcc_cache()
 
         pcc_sizes = [len(pcc) for pcc in self._pccs]
 
-        # Compute min internal stability - only for pairs with negative edges
+        # Compute min internal stability using PCC pair iteration (not neighbor iteration)
         min_internal = float('inf')
         for pcc_id, pcc in enumerate(self._pccs):
             if len(pcc) < 2:
                 continue
 
-            # Collect negative edges within this PCC
+            # Find intra-PCC edges by iterating node pairs (O(N^2) with N = PCC size)
+            pcc_list = sorted(pcc)
             negative_edges = []
-            for u in pcc:
-                for v in self.G.neighbors(u):
-                    if v in pcc and u < v:
+            positive_edges = []
+            for i in range(len(pcc_list)):
+                for j in range(i + 1, len(pcc_list)):
+                    u, v = pcc_list[i], pcc_list[j]
+                    if self.G.has_edge(u, v):
                         edge_data = self.G[u][v].get('data')
-                        if edge_data and edge_data.label == EdgeLabel.NEGATIVE:
-                            negative_edges.append((u, v, edge_data.confidence))
+                        if edge_data:
+                            if edge_data.label == EdgeLabel.NEGATIVE:
+                                negative_edges.append((u, v, edge_data.confidence))
+                            elif edge_data.label == EdgeLabel.POSITIVE:
+                                positive_edges.append((u, v, edge_data.confidence))
 
             if not negative_edges:
                 continue
 
-            # Build MST once for this PCC
+            # Build MST from positive edges within this PCC
             pcc_graph = nx.Graph()
-            for u in pcc:
-                for v in self.G.neighbors(u):
-                    if v in pcc and u < v:
-                        edge_data = self.G[u][v].get('data')
-                        if edge_data and edge_data.label == EdgeLabel.POSITIVE:
-                            pcc_graph.add_edge(u, v, weight=edge_data.confidence)
+            for u, v, conf in positive_edges:
+                pcc_graph.add_edge(u, v, weight=conf)
 
             if pcc_graph.number_of_edges() == 0:
                 continue
@@ -988,52 +1294,45 @@ class StabilityGraph:
                 if len(path) < 2:
                     continue
 
-                # Find MSP strength
                 msp_strength = min(mst[path[i]][path[i+1]]['weight'] for i in range(len(path)-1))
                 stab = msp_strength - neg_conf
                 if stab < min_internal:
                     min_internal = stab
 
-        # Compute min external stability - only for PCC pairs with negative edges
+        # Compute min external stability.
+        # Per PDF: external_stability(A,B) = max_neg_conf - max_pos_inactive_conf
+        # Even PCC pairs with NO positive-inactive edges have finite external stability
+        # equal to their max negative confidence (since max_pos_inactive = 0).
         min_external = float('inf')
-        pcc_pair_stats: Dict[Tuple[int, int], Tuple[float, float]] = {}  # (max_neg, max_pos_inactive)
+        pcc_pair_max_neg: Dict[Tuple[int, int], float] = {}
+        pcc_pair_pos_inactive: Dict[Tuple[int, int], float] = {}
 
-        for u in self.G.nodes():
-            pcc_u = self._node_to_pcc.get(u)
-            if pcc_u is None:
+        for u, v, attr in self.G.edges(data=True):
+            ed = attr.get('data')
+            if ed is None:
                 continue
+            pcc_u = self._node_to_pcc.get(u)
+            pcc_v = self._node_to_pcc.get(v)
+            if pcc_u is None or pcc_v is None or pcc_u == pcc_v:
+                continue
+            pcc_pair = (min(pcc_u, pcc_v), max(pcc_u, pcc_v))
+            if ed.label == EdgeLabel.NEGATIVE:
+                current = pcc_pair_max_neg.get(pcc_pair, 0.0)
+                pcc_pair_max_neg[pcc_pair] = max(current, ed.confidence)
+            elif ed.label == EdgeLabel.POSITIVE_INACTIVE:
+                current = pcc_pair_pos_inactive.get(pcc_pair, 0.0)
+                pcc_pair_pos_inactive[pcc_pair] = max(current, ed.confidence)
 
-            for v in self.G.neighbors(u):
-                pcc_v = self._node_to_pcc.get(v)
-                if pcc_v is None or pcc_u == pcc_v:
-                    continue
-
-                pcc_pair = (min(pcc_u, pcc_v), max(pcc_u, pcc_v))
-                edge_data = self.G[u][v].get('data')
-                if not edge_data:
-                    continue
-
-                current = pcc_pair_stats.get(pcc_pair, (None, 0.0))
-                max_neg, max_pos_inactive = current
-
-                if edge_data.label == EdgeLabel.NEGATIVE:
-                    if max_neg is None or edge_data.confidence > max_neg:
-                        max_neg = edge_data.confidence
-                elif edge_data.label == EdgeLabel.POSITIVE_INACTIVE:
-                    max_pos_inactive = max(max_pos_inactive, edge_data.confidence)
-
-                pcc_pair_stats[pcc_pair] = (max_neg, max_pos_inactive)
-
-        for pcc_pair, (max_neg, max_pos_inactive) in pcc_pair_stats.items():
-            if max_neg is not None:
-                stab = max_neg - max_pos_inactive
-                if stab < min_external:
-                    min_external = stab
+        for pcc_pair, max_neg in pcc_pair_max_neg.items():
+            max_pi = pcc_pair_pos_inactive.get(pcc_pair, 0.0)
+            stab = max_neg - max_pi
+            if stab < min_external:
+                min_external = stab
 
         return {
             'num_nodes': self.G.number_of_nodes(),
             'num_edges': self.G.number_of_edges(),
-            'edge_counts': edge_counts,
+            'edge_counts': dict(self._edge_counts),
             'num_pccs': len(self._pccs),
             'pcc_sizes': pcc_sizes,
             'min_pcc_size': min(pcc_sizes) if pcc_sizes else 0,

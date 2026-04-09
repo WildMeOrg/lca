@@ -101,33 +101,51 @@ def _find_threshold(pi, mu, sigma2):
 
 
 def _plot_threshold(scores, pi, mu, sigma2, threshold, plot_path):
-    """Plot histogram with fitted distributions and threshold."""
-    fig, ax = plt.subplots(figsize=(10, 6))
+    """Plot histogram with fitted distributions and threshold.
 
-    # Plot histogram
-    ax.hist(scores, bins=50, density=True, alpha=0.6, color='gray', edgecolor='black')
+    Uses log scale on y-axis so the tiny positive component (often <1% of data)
+    is visible alongside the dominant negative component.
+    """
+    fig, (ax_lin, ax_log) = plt.subplots(2, 1, figsize=(12, 10))
 
     # Generate x values for plotting distributions
     x_min, x_max = scores.min(), scores.max()
     x_range = x_max - x_min
-    x = np.linspace(x_min - 0.2 * x_range, x_max + 0.2 * x_range, 1000)
+    x = np.linspace(x_min - 0.1 * x_range, x_max + 0.1 * x_range, 1000)
 
-    # Plot left distribution (red) and right distribution (green)
-    for k in range(2):
+    # Unweighted PDFs so both components are visible regardless of mixing weight
+    component_pdfs = []
+    for k in range(len(pi)):
         pdf = stats.norm.pdf(x, mu[k], np.sqrt(sigma2[k]))
-        color = 'red' if k == 0 else 'green'
-        label = f'Component {k+1} (μ={mu[k]:.3f}, σ={np.sqrt(sigma2[k]):.3f}, π={pi[k]:.3f})'
-        ax.plot(x, pdf, color=color, linewidth=2, label=label)
+        component_pdfs.append(pdf)
 
-    # Plot threshold as vertical line
-    ax.axvline(threshold, color='black', linestyle='--', linewidth=2,
-               label=f'Threshold = {threshold:.4f}')
+    colors = ['red', 'green', 'blue', 'orange']
+    labels = [f'Component {k+1} (μ={mu[k]:.3f}, σ={np.sqrt(sigma2[k]):.3f}, π={pi[k]:.4f})'
+              for k in range(len(pi))]
 
-    ax.set_xlabel('Score', fontsize=12)
-    ax.set_ylabel('Density', fontsize=12)
-    ax.set_title('GMM-based Threshold Detection', fontsize=14, fontweight='bold')
-    ax.legend(fontsize=10)
-    ax.grid(True, alpha=0.3)
+    for ax, yscale, title_suffix in [
+        (ax_lin, 'linear', '(linear scale)'),
+        (ax_log, 'log', '(log scale — shows small component)')
+    ]:
+        ax.hist(scores, bins=200, density=True, alpha=0.5, color='gray',
+                edgecolor='none', label='Data')
+
+        for k in range(len(pi)):
+            ax.plot(x, component_pdfs[k], color=colors[k % len(colors)],
+                    linewidth=2, label=labels[k])
+
+        ax.axvline(threshold, color='black', linestyle='--', linewidth=2,
+                   label=f'Threshold = {threshold:.4f}')
+
+        ax.set_yscale(yscale)
+        ax.set_xlabel('Score', fontsize=12)
+        ax.set_ylabel('Density', fontsize=12)
+        ax.set_title(f'GMM Threshold Detection {title_suffix}', fontsize=13, fontweight='bold')
+        ax.legend(fontsize=9, loc='upper left')
+        ax.grid(True, alpha=0.3)
+
+        if yscale == 'log':
+            ax.set_ylim(bottom=1e-4)
 
     plt.tight_layout()
     plt.savefig(plot_path, dpi=150, bbox_inches='tight')
@@ -182,21 +200,33 @@ def find_threshold(scores, entropy_alpha=0.85, n_init=1, verbose=False, print_fu
         mu = mu3[1:3]
         sigma2 = sigma2_3[1:3]
 
-        # Fallback: if bulk is still rightmost, create synthetic right tail
+        # Fallback: if bulk is still rightmost, fit to empirical right tail
         if pi[0] < pi[1] and mu[0] < mu[1]:
-            if verbose:
-                print_func("⚠ Could not find right tail, creating synthetic component...")
-
             bulk_pi = pi[1]
             bulk_mu = mu[1]
             bulk_sigma2 = sigma2[1]
             bulk_sigma = np.sqrt(bulk_sigma2)
 
-            # Position fake component so intersection is at right tail of bulk
-            fake_mu = bulk_mu + 5 * bulk_sigma
-            fake_sigma2 = bulk_sigma2 * 1.5
+            # Use empirical right-tail scores: only scores extremely unlikely under bulk
+            # (99.9th percentile of bulk distribution = ~3.1 sigma above bulk mean)
+            tail_cutoff = stats.norm.ppf(0.999, bulk_mu, bulk_sigma)
+            right_tail = scores[scores > tail_cutoff]
 
-            fake_pi = max(1 - bulk_pi, 0.001)  # minimum weight for F1 optimization
+            if len(right_tail) >= 10:
+                if verbose:
+                    print_func(f"⚠ Could not find right tail via GMM, fitting to {len(right_tail)} empirical right-tail scores...")
+                fake_mu = np.mean(right_tail)
+                fake_sigma2 = max(np.var(right_tail), bulk_sigma2 * 0.01)
+                fake_pi = max(len(right_tail) / len(scores), 0.001)
+            else:
+                # Distribution is genuinely single-moded: threshold = 99th percentile.
+                # Represent as bulk + narrow spike at that percentile so the plot is honest.
+                if verbose:
+                    print_func("⚠ Right tail essentially empty, using 99th percentile as threshold...")
+                fake_mu = float(np.percentile(scores, 99))
+                fake_sigma2 = bulk_sigma2 * 0.01
+                fake_pi = 1.0 - bulk_pi
+
             pi = np.array([bulk_pi, fake_pi])
             pi /= pi.sum()
             mu = np.array([bulk_mu, fake_mu])

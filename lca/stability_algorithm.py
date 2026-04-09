@@ -48,7 +48,7 @@ class LCAv3StabilityAlgorithm:
         self.max_human_reviews = config.get('max_human_reviews', 1000)
 
         # Human review parameters
-        self.ch = config.get('human_confidence', 0.5)  # Confidence added/subtracted per review
+        self.ch = config.get('review_confidence', config.get('human_confidence', 0.5))  # Confidence change per review
         self.edges_per_review_batch = config.get('edges_per_review_batch', 20)  # Max edges per batch
         self.tries_before_edge_done = config.get('tries_before_edge_done', 4)  # Max reviews per edge
         self.human_attempts = {}  # Track review attempts per edge: {(n0, n1): count}
@@ -59,17 +59,40 @@ class LCAv3StabilityAlgorithm:
         self.cross_pcc_max_edges = config.get('cross_pcc_max_edges', 100)
         self.max_densify_edges = config.get('max_densify_edges', 2000)
 
-        # Phase 0 stability threshold (slightly negative = less aggressive fragmentation)
-        # Default 0.0 means strict 0-stability; -0.1 allows small instabilities
+        # Phase 0 controls
+        self.max_phase0_iterations = config.get('max_phase0_iterations', 20)
         self.phase0_alpha = config.get('phase0_alpha', 0.0)
+        self.sparsify_on_init = config.get('sparsify_on_init', False)
+        self._phase0_prev_pcc_count = None
+        self._phase0_stall_count = 0
 
         # Densification strategy: if True, add likely negative edges first (more aggressive)
         # Default False adds likely positive edges first (less fragmentation)
         self.densify_prioritize_negatives = config.get('densify_prioritize_negatives', False)
 
+        # Structural weight for candidate selection: 0 = pure stability, >0 = favor high-impact splits/merges
+        self.structural_weight = config.get('structural_weight', 0.0)
+
+        # Confidence weight: 0 = ignore confidence, >0 = prefer reviewing low-confidence edges
+        self.confidence_weight = config.get('confidence_weight', 0.0)
+
+        # Sampling temperature: 0 = deterministic greedy, >0 = Boltzmann sampling (exploration)
+        self.sampling_temperature = config.get('sampling_temperature', 0.0)
+
+        # Unverified candidates: progressively raise threshold to review more edges
+        self.unverified_threshold_step = config.get('unverified_threshold_step', 0.0)
+        self._current_unverified_threshold = 0.0
+
         # Validation
         self.validation_step = config.get('validation_step', 20)
         self.validation_initialized = False
+
+        # Diagnostic: map pending review edges to their candidate type
+        self._pending_review_types: Dict[Tuple[int, int], str] = {}
+        # Cumulative agreement/disagreement counts per candidate type
+        from collections import defaultdict
+        self._cumulative_agree: Dict[str, int] = defaultdict(int)
+        self._cumulative_disagree: Dict[str, int] = defaultdict(int)
 
         # Phase 0 iteration counter for metric logging
         self.phase0_iteration = 0
@@ -77,6 +100,7 @@ class LCAv3StabilityAlgorithm:
         logger.info(f"LCA v2 Stability Algorithm initialized")
         logger.info(f"  Target alpha: {self.target_alpha}")
         logger.info(f"  Phase 0 alpha: {self.phase0_alpha}")
+        logger.info(f"  Max Phase 0 iterations: {self.max_phase0_iterations}")
         logger.info(f"  Human confidence (ch): {self.ch}")
         logger.info(f"  Max human reviews: {self.max_human_reviews}")
         logger.info(f"  Tries before edge done: {self.tries_before_edge_done}")
@@ -96,6 +120,11 @@ class LCAv3StabilityAlgorithm:
 
         # Count human reviews and apply feedback
         needs_restabilization = False
+        # Track agreement/disagreement per candidate type for informativeness metric
+        from collections import defaultdict
+        type_agree = defaultdict(int)
+        type_disagree = defaultdict(int)
+
         for edge in new_edges:
             if len(edge) > 3 and 'human' in str(edge[3]):
                 n0, n1, score, verifier_name = edge[:4]
@@ -107,23 +136,64 @@ class LCAv3StabilityAlgorithm:
                 if attempts < self.tries_before_edge_done:
                     self.human_attempts[edge_key] = attempts + 1
                     self.num_human_reviews += 1
+
+                    # Determine agreement BEFORE applying feedback
+                    edge_data = self.graph.get_edge(n0, n1)
+                    if edge_data:
+                        human_decision = score > 0.5
+                        current_is_positive = edge_data.label in (EdgeLabel.POSITIVE, EdgeLabel.POSITIVE_INACTIVE)
+                        human_agrees = (human_decision == current_is_positive)
+                        ctype = self._pending_review_types.get(edge_key, "UNKNOWN")
+                        if human_agrees:
+                            type_agree[ctype] += 1
+                        else:
+                            type_disagree[ctype] += 1
+
                     if self._apply_human_feedback(n0, n1, score):
                         needs_restabilization = True
                 else:
                     logger.warning(f"Edge {edge_key} exceeded max attempts ({self.tries_before_edge_done}), skipping")
 
+        # Log per-type disagreement rates (higher = more informative candidates)
+        all_types = set(type_agree.keys()) | set(type_disagree.keys())
+        if all_types:
+            # Update cumulative counts
+            for ctype in all_types:
+                self._cumulative_agree[ctype] += type_agree[ctype]
+                self._cumulative_disagree[ctype] += type_disagree[ctype]
+
+            # Batch stats
+            parts = []
+            for ctype in sorted(all_types):
+                a = type_agree[ctype]
+                d = type_disagree[ctype]
+                total = a + d
+                pct = d / total * 100 if total > 0 else 0
+                parts.append(f"{ctype}: {d}/{total} disagree ({pct:.0f}%)")
+            logger.info(f"Review informativeness (batch): {', '.join(parts)}")
+
+            # Cumulative stats
+            all_cumulative = set(self._cumulative_agree.keys()) | set(self._cumulative_disagree.keys())
+            parts = []
+            for ctype in sorted(all_cumulative):
+                a = self._cumulative_agree[ctype]
+                d = self._cumulative_disagree[ctype]
+                total = a + d
+                pct = d / total * 100 if total > 0 else 0
+                parts.append(f"{ctype}: {d}/{total} disagree ({pct:.0f}%)")
+            logger.info(f"Review informativeness (cumulative): {', '.join(parts)}")
+
+        # Detect PCC splits from human reviews and queue cross-check edges
         # Per PDF step 5: "Update the labels of edges to make the graph 0-stable"
-        # Only needed if any review flipped a negative edge to positive
         if needs_restabilization:
             logger.info("Starting re-stabilization...")
             deactivations = self.graph.make_zero_stable()
             if deactivations > 0:
                 logger.info(f"Re-stabilized after human reviews: {deactivations} deactivations")
 
-        # Phase 0: Reach 0-stability
+        # Phase dispatch
         if self.phase == "PHASE0":
             return self._phase0_step()
-        # Active Review: Improve to target alpha
         elif self.phase == "ACTIVE_REVIEW":
             return self._active_review_step()
         else:
@@ -139,6 +209,14 @@ class LCAv3StabilityAlgorithm:
         # Increment phase 0 iteration counter
         self.phase0_iteration += 1
         logger.info(f"=== Phase 0 iteration {self.phase0_iteration} ===")
+
+        # Sparsify initial graph on first iteration: reduce each PCC to its MST
+        # so that make_zero_stable converges (tree-structured PCCs guarantee
+        # that cutting one MST edge actually separates the unstable pair)
+        if self.phase0_iteration == 1 and self.sparsify_on_init:
+            sparsified = self.graph.sparsify_pccs()
+            if sparsified > 0:
+                logger.info(f"Initial sparsification: {sparsified} edges deactivated")
 
         # Discover cross-PCC edges
         num_discovered = self._discover_cross_pcc_edges()
@@ -161,19 +239,35 @@ class LCAv3StabilityAlgorithm:
         deactivations = self.graph.make_zero_stable(alpha=self.phase0_alpha)
         logger.info(f"Made {deactivations} edges positive-inactive for {self.phase0_alpha}-stability")
 
-        # Log metrics for this phase 0 iteration
-        self._log_phase0_metrics(self.phase0_iteration)
+        # Log metrics only when significant changes occur (saves ~30s per skipped iteration)
+        if num_discovered > 0 or deactivations >= 5 or self.phase0_iteration <= 1:
+            self._log_phase0_metrics(self.phase0_iteration)
 
         # Check for transition to ACTIVE_REVIEW
-        # Must have: 1) all edges processed OR no edges to process, AND 2) no deactivations (converged)
         all_edges_processed = self._all_edges_sorted and self._sorted_edge_index >= len(self._all_edges_sorted)
         no_edges_to_process = self._all_edges_sorted is None or len(self._all_edges_sorted) == 0
         converged = (deactivations == 0 and num_discovered == 0)
 
-        # Transition to ACTIVE_REVIEW if:
-        # - All edges processed and converged, OR
-        # - No edges to process and converged (small graph case)
-        if (all_edges_processed or no_edges_to_process) and converged:
+        # Detect oscillation: PCC count unchanged for consecutive iterations
+        current_pcc_count = len(pccs)
+        if current_pcc_count == self._phase0_prev_pcc_count and num_discovered == 0:
+            self._phase0_stall_count += 1
+        else:
+            self._phase0_stall_count = 0
+        self._phase0_prev_pcc_count = current_pcc_count
+
+        # Force convergence if: iteration limit reached OR oscillating (stalled 3+ iters)
+        force_converge = (
+            self.phase0_iteration >= self.max_phase0_iterations or
+            (self._phase0_stall_count >= 3 and all_edges_processed)
+        )
+
+        if force_converge and not converged:
+            logger.info(f"=== Phase 0 complete - forced (iteration={self.phase0_iteration}, "
+                       f"stall_count={self._phase0_stall_count}, deactivations={deactivations}) ===")
+            converged = True
+
+        if converged or force_converge:
             logger.info("=== Phase 0 complete - converged ===")
             self._log_stats()
 
@@ -211,6 +305,29 @@ class LCAv3StabilityAlgorithm:
             self.phase = "FINISHED"
             return []
 
+        # Raise unverified threshold progressively: widen the net of edges considered for review
+        if self.unverified_threshold_step > 0:
+            self._current_unverified_threshold = min(
+                1.0, self._current_unverified_threshold + self.unverified_threshold_step
+            )
+            logger.info(f"Unverified threshold: {self._current_unverified_threshold:.4f}")
+
+        # Discover new cross-PCC edges, biased toward isolated PCCs (NIS-style)
+        num_isolated = self._discover_edges_for_isolated_pccs()
+        if num_isolated > 0:
+            logger.info(f"Isolated PCC discovery: {num_isolated} new cross-PCC edges")
+            deactivations = self.graph.make_zero_stable()
+            if deactivations > 0:
+                logger.info(f"Post-discovery stabilization: {deactivations} deactivations")
+
+        # Continue regular cross-PCC discovery (PCCs change during active review)
+        num_regular = self._discover_cross_pcc_edges()
+        if num_regular > 0:
+            logger.info(f"Regular discovery: {num_regular} new cross-PCC edges")
+            deactivations = self.graph.make_zero_stable()
+            if deactivations > 0:
+                logger.info(f"Post-discovery stabilization: {deactivations} deactivations")
+
         # Get current stability
         stats = self.graph.get_graph_stats()
         min_internal = stats['min_internal_stability']
@@ -241,8 +358,29 @@ class LCAv3StabilityAlgorithm:
 
         # Lazy candidate selection: generate candidates on-demand and stop when saturated
         logger.info("Starting candidate generation...")
-        batch = self.graph.select_non_conflicting_candidates_lazy(alpha=self.target_alpha, max_batch_size=self.edges_per_review_batch)
+        verified_edges = set(self.human_attempts.keys())
+
+        # Compute PCC separation strength for NIS-style candidate scoring
+        pcc_strength = self._compute_pcc_separation_strength()
+
+        batch = self.graph.select_non_conflicting_candidates_lazy(
+            alpha=self.target_alpha, max_batch_size=self.edges_per_review_batch,
+            structural_weight=self.structural_weight,
+            confidence_weight=self.confidence_weight,
+            sampling_temperature=self.sampling_temperature,
+            verified_edges=verified_edges,
+            unverified_threshold=self._current_unverified_threshold,
+            pcc_separation_strength=pcc_strength,
+        )
         logger.info("Candidate generation complete")
+
+        # Build edge→candidate_type mapping BEFORE filtering (indices match original batch)
+        batch_types = getattr(self.graph, '_last_batch_types', [])
+        self._pending_review_types = {}
+        for i, edge in enumerate(batch):
+            edge_key = (min(edge[0], edge[1]), max(edge[0], edge[1]))
+            if i < len(batch_types):
+                self._pending_review_types[edge_key] = batch_types[i]
 
         # Filter out edges that have exceeded max human review attempts
         filtered_batch = []
@@ -282,8 +420,7 @@ class LCAv3StabilityAlgorithm:
 
         Per PDF step 4: Apply confidence change (agree/disagree)
 
-        Returns: True if this was a disagreement on a negative edge (flipped to positive),
-                 which could create new instability requiring re-stabilization.
+        Returns: True if this could create new instability requiring re-stabilization.
         """
         if not self.graph.has_edge(n0, n1):
             return False
@@ -295,8 +432,14 @@ class LCAv3StabilityAlgorithm:
         current_is_positive = edge_data.label in (EdgeLabel.POSITIVE, EdgeLabel.POSITIVE_INACTIVE)
         human_agrees = (human_decision == current_is_positive)
 
-        # Check if this could create instability (disagree on negative -> flips to positive)
-        could_create_instability = (not human_agrees) and (not current_is_positive)
+        # Check if this could create instability:
+        # 1. Disagree on negative -> flips to positive (new positive edge between PCCs)
+        # 2. Agree on positive-inactive -> re-activates (merges PCCs, may need re-stabilization)
+        was_positive_inactive = edge_data.label == EdgeLabel.POSITIVE_INACTIVE
+        could_create_instability = (
+            ((not human_agrees) and (not current_is_positive)) or
+            (human_agrees and was_positive_inactive)
+        )
 
         # Apply the review
         self.graph.apply_human_review(n0, n1, human_agrees, self.ch)
@@ -327,7 +470,12 @@ class LCAv3StabilityAlgorithm:
                 self.graph.add_edge(n0, n1, edge_label, confidence, score, ranker)
 
     def _discover_cross_pcc_edges(self) -> int:
-        """Discover edges between different PCCs."""
+        """Discover edges between different PCCs.
+
+        Uses a union-find to track PCC merges within this iteration, so that
+        positive cross-PCC edges don't redundantly connect already-merged
+        components (which would re-introduce density after sparsification).
+        """
         pccs = self.graph.get_pccs()
 
         if len(pccs) <= 1:
@@ -344,13 +492,31 @@ class LCAv3StabilityAlgorithm:
         if self._all_edges_sorted is None:
             self._initialize_sorted_edges(embeddings)
 
-        # Build node-to-PCC mapping
+        # Build union-find for PCC tracking (stays current as positive edges merge PCCs)
+        pcc_parent = {}
+        for pcc_id, pcc in enumerate(pccs):
+            pcc_parent[pcc_id] = pcc_id
         node_to_pcc = {}
         for pcc_id, pcc in enumerate(pccs):
             for node in pcc:
                 node_to_pcc[node] = pcc_id
 
+        def find(x):
+            while pcc_parent[x] != x:
+                pcc_parent[x] = pcc_parent[pcc_parent[x]]  # path compression
+                x = pcc_parent[x]
+            return x
+
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                pcc_parent[ra] = rb
+
         # Find cross-PCC edges
+        # Reset index each iteration so edges skipped (same-PCC at the time) get re-evaluated
+        # after make_zero_stable may have split those PCCs
+        self._sorted_edge_index = 0
+
         new_edges = 0
         while new_edges < self.cross_pcc_max_edges and self._sorted_edge_index < len(self._all_edges_sorted):
             n0, n1, score = self._all_edges_sorted[self._sorted_edge_index]
@@ -362,7 +528,8 @@ class LCAv3StabilityAlgorithm:
             pcc0 = node_to_pcc.get(n0)
             pcc1 = node_to_pcc.get(n1)
 
-            if pcc0 == pcc1:
+            # Use union-find to check if PCCs are already merged
+            if find(pcc0) == find(pcc1):
                 continue
 
             # Classify and add
@@ -371,6 +538,141 @@ class LCAv3StabilityAlgorithm:
             edge_label = EdgeLabel.POSITIVE if label == "positive" else EdgeLabel.NEGATIVE
             self.graph.add_edge(n0, n1, edge_label, confidence, score, ranker)
             new_edges += 1
+
+            # If positive, merge the PCCs in our union-find
+            if edge_label == EdgeLabel.POSITIVE:
+                union(pcc0, pcc1)
+
+        return new_edges
+
+    def _compute_pcc_separation_strength(self) -> Dict[int, float]:
+        """Compute separation strength for each PCC (NIS-style n_hat analog).
+
+        For each PCC, sums the max negative confidence to each other PCC it connects to.
+        High sum = confidently separated from all neighbors (well-known identity).
+        Low sum = weakly separated (uncertain, may need merging) = "isolated" in NIS sense.
+
+        Returns: Dict mapping pcc_id -> total separation confidence.
+        """
+        self.graph._ensure_pcc_cache()
+        node_to_pcc = self.graph._node_to_pcc
+        from collections import defaultdict
+
+        # For each PCC pair, track max negative confidence
+        pcc_pair_max_neg: Dict[Tuple[int, int], float] = {}
+
+        for pcc_id, pcc in enumerate(self.graph._pccs):
+            for node in pcc:
+                for nbr in self.graph.G.neighbors(node):
+                    nbr_pcc = node_to_pcc.get(nbr)
+                    if nbr_pcc is None or nbr_pcc == pcc_id:
+                        continue
+                    edge_data = self.graph.G[node][nbr].get('data')
+                    if edge_data and edge_data.label == EdgeLabel.NEGATIVE:
+                        pair = (min(pcc_id, nbr_pcc), max(pcc_id, nbr_pcc))
+                        current = pcc_pair_max_neg.get(pair, 0.0)
+                        pcc_pair_max_neg[pair] = max(current, edge_data.confidence)
+
+        # Sum max negative confidence across all PCC pairs for each PCC
+        pcc_strength: Dict[int, float] = defaultdict(float)
+        for (pcc_a, pcc_b), conf in pcc_pair_max_neg.items():
+            pcc_strength[pcc_a] += conf
+            pcc_strength[pcc_b] += conf
+
+        return dict(pcc_strength)
+
+    def _discover_edges_for_isolated_pccs(self) -> int:
+        """Discover cross-PCC edges biased toward isolated PCCs (NIS-style).
+
+        Uses confidence-based separation strength (NIS n_hat analog) instead of
+        discrete degree. PCCs with low separation strength are "isolated" — weakly
+        separated from neighbors and likely to benefit from more cross-PCC edges.
+        """
+        pccs = self.graph.get_pccs()
+
+        if len(pccs) <= 1:
+            return 0
+
+        # Get classifier
+        first_classifier = self.classifier_manager.algo_classifiers[0] if self.classifier_manager.algo_classifiers else None
+        if first_classifier is None:
+            return 0
+
+        embeddings, _ = self.classifier_manager.classifier_units[first_classifier]
+
+        # Initialize sorted edge list if needed
+        if self._all_edges_sorted is None:
+            self._initialize_sorted_edges(embeddings)
+
+        # Compute confidence-based separation strength per PCC
+        pcc_strength = self._compute_pcc_separation_strength()
+        strengths = [pcc_strength.get(i, 0.0) for i in range(len(pccs))]
+        sorted_strengths = sorted(strengths)
+        median_strength = sorted_strengths[len(sorted_strengths) // 2]
+
+        # Isolated = below median separation strength (weakly separated from neighbors)
+        # PCCs with 0 strength have no negative edges at all — completely unknown
+        isolated_pcc_ids = {i for i in range(len(pccs))
+                           if pcc_strength.get(i, 0.0) <= median_strength}
+
+        n_zero = sum(1 for s in strengths if s == 0.0)
+        logger.info(f"PCC separation strength: min={min(strengths):.3f}, median={median_strength:.3f}, "
+                    f"max={max(strengths):.3f}, "
+                    f"zero={n_zero}/{len(pccs)}, "
+                    f"isolated (<={median_strength:.3f}): {len(isolated_pcc_ids)}/{len(pccs)}")
+
+        if not isolated_pcc_ids:
+            return 0
+
+        # Build union-find for PCC tracking (same as _discover_cross_pcc_edges)
+        pcc_parent = {}
+        for pcc_id, pcc in enumerate(pccs):
+            pcc_parent[pcc_id] = pcc_id
+        node_to_pcc = {}
+        for pcc_id, pcc in enumerate(pccs):
+            for node in pcc:
+                node_to_pcc[node] = pcc_id
+
+        def find(x):
+            while pcc_parent[x] != x:
+                pcc_parent[x] = pcc_parent[pcc_parent[x]]
+                x = pcc_parent[x]
+            return x
+
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                pcc_parent[ra] = rb
+
+        self._sorted_edge_index = 0
+
+        new_edges = 0
+        while new_edges < self.cross_pcc_max_edges and self._sorted_edge_index < len(self._all_edges_sorted):
+            n0, n1, score = self._all_edges_sorted[self._sorted_edge_index]
+            self._sorted_edge_index += 1
+
+            if self.graph.has_edge(n0, n1):
+                continue
+
+            pcc0 = node_to_pcc.get(n0)
+            pcc1 = node_to_pcc.get(n1)
+
+            if find(pcc0) == find(pcc1):
+                continue
+
+            # NIS-style bias: only accept if at least one PCC is isolated
+            if pcc0 not in isolated_pcc_ids and pcc1 not in isolated_pcc_ids:
+                continue
+
+            # Classify and add
+            edge = self.classifier_manager.classify_edge(n0, n1, first_classifier)
+            _, _, score, confidence, label, ranker = edge
+            edge_label = EdgeLabel.POSITIVE if label == "positive" else EdgeLabel.NEGATIVE
+            self.graph.add_edge(n0, n1, edge_label, confidence, score, ranker)
+            new_edges += 1
+
+            if edge_label == EdgeLabel.POSITIVE:
+                union(pcc0, pcc1)
 
         return new_edges
 
@@ -435,19 +737,13 @@ class LCAv3StabilityAlgorithm:
         if self.phase == "FINISHED":
             return True
 
-        # Don't terminate due to max_human_reviews during Phase 0 - let it complete
-        if self.phase != "PHASE0" and self.num_human_reviews >= self.max_human_reviews:
+        # Phase 0 convergence is handled inside _phase0_step() — don't recompute here
+        if self.phase == "PHASE0":
+            return False
+
+        # Active review termination
+        if self.num_human_reviews >= self.max_human_reviews:
             return True
-
-        # Check if all edges processed and 0-stable
-        all_edges_done = self._all_edges_sorted is not None and \
-                         self._sorted_edge_index >= len(self._all_edges_sorted)
-
-        if all_edges_done:
-            stats = self.graph.get_graph_stats()
-            min_stab = min(stats['min_internal_stability'], stats['min_external_stability'])
-            if min_stab >= self.target_alpha:
-                return True
 
         return False
 
@@ -515,6 +811,19 @@ class LCAv3StabilityAlgorithm:
         logger.info("-" * 60)
         logger.info(f"MST Forest:")
         logger.info(f"  Edges: {mst_stats['mst_forest_edges']}")
+        logger.info("-" * 60)
+        pcc_strength = self._compute_pcc_separation_strength()
+        strengths = [pcc_strength.get(i, 0.0) for i in range(stats['num_pccs'])]
+        if strengths:
+            sorted_s = sorted(strengths)
+            n_zero = sum(1 for s in strengths if s == 0.0)
+            median_s = sorted_s[len(sorted_s) // 2]
+            n_isolated = sum(1 for s in strengths if s <= median_s)
+            logger.info(f"PCC supergraph (separation strength):")
+            logger.info(f"  Strength: min={min(strengths):.3f}, "
+                        f"median={median_s:.3f}, max={max(strengths):.3f}")
+            logger.info(f"  Zero strength (no negative edges): {n_zero}/{len(strengths)}")
+            logger.info(f"  Isolated (<=median): {n_isolated}/{len(strengths)}")
         logger.info("=" * 60)
 
     def show_stats(self):
