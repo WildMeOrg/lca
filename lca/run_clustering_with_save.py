@@ -19,11 +19,44 @@ from run import main as run_clustering
 from save_clustering_results import save_clustering_results, combine_field_separated_results
 
 
-def load_config(config_path):
-    """Load YAML configuration file."""
+def deep_merge(base, override):
+    """Recursively merge override dict into base dict.
+
+    For nested dicts, values are merged recursively rather than replaced.
+    For all other types, the override value replaces the base value.
+    Modifies base in-place and returns it.
+    """
+    for key, value in override.items():
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+            deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def load_config(config_path, base_config_path=None):
+    """Load YAML configuration file, optionally merging on top of a base config.
+
+    Args:
+        config_path: Path to the species/primary config file.
+        base_config_path: Optional path to a base (universal) config file.
+            If provided, the base config is loaded first and the species
+            config is deep-merged on top of it.
+
+    Returns:
+        dict: The (merged) configuration dictionary.
+    """
     import yaml
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
+    if base_config_path:
+        with open(base_config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        with open(config_path, 'r') as f:
+            species_config = yaml.safe_load(f)
+        deep_merge(config, species_config)
+        return config
+    else:
+        with open(config_path, 'r') as f:
+            return yaml.safe_load(f)
 
 
 def load_ground_truth_clustering(anno_file, uuid_key='uuid', name_keys=None):
@@ -626,6 +659,8 @@ def main():
 
     parser.add_argument("--config", type=str, required=True,
                        help="Path to config file")
+    parser.add_argument("--base_config", type=str, default=None,
+                       help="Base config file (universal). Species config is merged on top.")
     parser.add_argument("--save_dir", type=str,
                        help="Directory to save formatted results (default: same as clustering output)")
     parser.add_argument("--interactive", "-i", action='store_true',
@@ -633,8 +668,8 @@ def main():
 
     args = parser.parse_args()
 
-    # Load config
-    config = load_config(args.config)
+    # Load config (with optional base config merging)
+    config = load_config(args.config, base_config_path=args.base_config)
 
     # Run clustering and formatting
     metrics = run_clustering_with_save(config)

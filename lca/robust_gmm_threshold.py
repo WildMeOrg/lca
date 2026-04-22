@@ -152,12 +152,49 @@ def _plot_threshold(scores, pi, mu, sigma2, threshold, plot_path):
     plt.close()
 
 
-def find_threshold(scores, entropy_alpha=0.85, n_init=1, verbose=False, print_func=print, plot_path=None):
+def _plot_fallback_threshold(scores, threshold, plot_path, percentile):
+    """Plot histogram with quantile-based fallback threshold (no GMM components)."""
+    fig, (ax_lin, ax_log) = plt.subplots(2, 1, figsize=(12, 10))
+    for ax, yscale, suffix in [(ax_lin, 'linear', '(linear scale)'),
+                                (ax_log, 'log', '(log scale)')]:
+        ax.hist(scores, bins=200, density=True, alpha=0.5, color='gray',
+                edgecolor='none', label='Data')
+        ax.axvline(threshold, color='black', linestyle='--', linewidth=2,
+                   label=f'Fallback threshold = {threshold:.4f} (p{percentile})')
+        ax.set_yscale(yscale)
+        if yscale == 'log':
+            ax.set_ylim(bottom=1e-4)
+        ax.set_xlabel('Score', fontsize=12)
+        ax.set_ylabel('Density', fontsize=12)
+        ax.set_title(f'GMM Fit Failed — Quantile Fallback {suffix}',
+                     fontsize=13, fontweight='bold')
+        ax.legend(fontsize=10, loc='upper left')
+        ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def _fit_is_degenerate(pi, mu, sigma2):
+    """Check whether the GMM parameters are invalid (NaN, non-positive variance, etc.)."""
+    for arr in (pi, mu, sigma2):
+        if not np.all(np.isfinite(arr)):
+            return True
+    if np.any(np.asarray(sigma2) <= 0):
+        return True
+    return False
+
+
+def find_threshold(scores, entropy_alpha=0.85, n_init=1, verbose=False,
+                   print_func=print, plot_path=None, fallback_percentile=99):
     """
     Find optimal classification threshold from unlabeled scores.
 
     Fits 2-component GMM with entropy regularization to handle extreme imbalance.
     Automatically detects and handles left-tail distributions.
+
+    When the GMM fit degenerates (NaN weights, collapsed components, non-finite
+    predicted F1), falls back to a percentile-based threshold.
 
     Parameters
     ----------
@@ -171,15 +208,25 @@ def find_threshold(scores, entropy_alpha=0.85, n_init=1, verbose=False, print_fu
         Print fitting progress
     plot_path : str, optional
         Path to save histogram plot with fitted distributions and threshold
+    fallback_percentile : float, default=99
+        Percentile used as the threshold when the GMM fit fails.
 
     Returns
     -------
     threshold : float
         Optimal decision threshold
-    predicted_f1 : float
-        Predicted F1 score at threshold
     """
     scores = np.asarray(scores).ravel()
+
+    def _use_fallback(reason):
+        fallback = float(np.percentile(scores, fallback_percentile))
+        print_func(f"⚠ {reason}; falling back to p{fallback_percentile} "
+                   f"threshold = {fallback:.4f}")
+        if plot_path is not None:
+            _plot_fallback_threshold(scores, fallback, plot_path, fallback_percentile)
+            print_func(f"📊 Saved fallback plot to: {plot_path}")
+        find_threshold._last_predicted_f1 = float('nan')
+        return fallback
 
     # Fit K=2 GMM
     pi, mu, sigma2 = _fit_gmm(scores, K=2, entropy_alpha=entropy_alpha,
@@ -232,8 +279,19 @@ def find_threshold(scores, entropy_alpha=0.85, n_init=1, verbose=False, print_fu
             mu = np.array([bulk_mu, fake_mu])
             sigma2 = np.array([bulk_sigma2, fake_sigma2])
 
+    # Guard: detect degenerate GMM fit (NaN weights, zero variance) before optimizing
+    if _fit_is_degenerate(pi, mu, sigma2):
+        return _use_fallback(
+            f"GMM fit produced invalid parameters (pi={pi}, mu={mu}, sigma2={sigma2})"
+        )
+
     # Find optimal threshold
     threshold, predicted_f1 = _find_threshold(pi, mu, sigma2)
+
+    # Guard: F1 may be NaN even with finite params (e.g., fully overlapping components)
+    if not np.isfinite(predicted_f1) or not np.isfinite(threshold):
+        return _use_fallback("GMM predicted F1 or threshold is non-finite")
+
     print_func(f"✅ Optimal threshold: {threshold:.4f}, predicted F1: {predicted_f1:.4f}")
 
     # Generate plot if requested
@@ -241,4 +299,6 @@ def find_threshold(scores, entropy_alpha=0.85, n_init=1, verbose=False, print_fu
         _plot_threshold(scores, pi, mu, sigma2, threshold, plot_path)
         print_func(f"📊 Saved threshold plot to: {plot_path}")
 
+    # Store predicted_f1 as a module-level variable for callers to access
+    find_threshold._last_predicted_f1 = predicted_f1
     return threshold

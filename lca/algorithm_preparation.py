@@ -4,6 +4,7 @@ Handles all common setup logic for both LCA and Graph Consistency algorithms.
 """
 
 import types
+import math
 import numpy as np
 import random
 import os
@@ -306,8 +307,9 @@ def prepare_common(config):
                     plot_path=config.get('logging', {}).get('auto_threshold_plot_path'))
             else:
                 base_threshold = float(base_spec)
-            # Cache threshold on base embeddings so classifier system can reuse it
+            # Cache threshold and predicted F1 on base embeddings so classifier system can reuse it
             base_embeddings._cached_gmm_threshold = base_threshold
+            base_embeddings._cached_gmm_predicted_f1 = getattr(robust_gmm_find_threshold, '_last_predicted_f1', None)
             stability_cfg = config.get('stability', {})
             kmeans_min_cluster_size = stability_cfg.get('kmeans_min_cluster_size', 1)
             kmeans_fallback_cluster_size = stability_cfg.get('kmeans_fallback_cluster_size', 1)
@@ -976,6 +978,133 @@ def prepare_thresholded_review(common_data, config):
     return thresholded_instance
 
 
+def estimate_num_individuals_from_topk(embeddings, threshold, topk=10):
+    """
+    Estimate the number of individuals by counting connected components
+    of the top-k graph after thresholding.
+
+    Builds the same top-k neighbor graph used by the algorithm, classifies
+    edges as positive (above threshold) or negative, then counts the
+    connected components of positive edges. This gives a much better
+    estimate than pi_positive because it accounts for graph structure.
+
+    Args:
+        embeddings: Embeddings object with get_edges() method
+        threshold: Classifier threshold for positive/negative classification
+        topk: Number of nearest neighbors (should match initial_topk)
+
+    Returns:
+        tuple: (estimated_num_individuals, predicted_f1_or_none)
+    """
+    import networkx as nx
+
+    # Get top-k edges with scores
+    edges = list(embeddings.get_edges(topk=topk, target_edges=0, target_proportion=0))
+    if not edges:
+        n = len(embeddings.ids) if hasattr(embeddings, 'ids') else 0
+        logger.info(f"Estimated num_individuals from top-k graph: {n} (no edges)")
+        return n
+
+    # Build graph of positive edges only
+    G = nx.Graph()
+    all_nodes = set()
+    n_positive = 0
+    n_negative = 0
+    for edge in edges:
+        n0, n1 = edge[0], edge[1]
+        score = edge[2] if len(edge) > 2 else 0.0
+        all_nodes.add(n0)
+        all_nodes.add(n1)
+        if score > threshold:
+            G.add_edge(n0, n1)
+            n_positive += 1
+        else:
+            n_negative += 1
+
+    # Add isolated nodes (no positive edges)
+    for node in all_nodes:
+        if node not in G:
+            G.add_node(node)
+
+    num_components = nx.number_connected_components(G)
+    n_total = len(all_nodes)
+    logger.info(f"Estimated num_individuals from top-k graph: {num_components} "
+                f"({n_positive} positive, {n_negative} negative edges, "
+                f"{n_total} nodes, threshold={threshold:.4f})")
+    return num_components
+
+
+def auto_compute_stability_params(stability_config, algorithm_config, num_nodes, num_individuals, predicted_f1=None):
+    """
+    Auto-compute stability parameters marked with 'auto' in the config.
+
+    Uses dataset statistics (num_nodes, num_individuals) to derive sensible
+    values for parameters that depend on data characteristics.
+
+    Args:
+        stability_config: Stability section of the config (modified in-place)
+        algorithm_config: Algorithm section of the config (modified in-place)
+        num_nodes: Number of annotations (nodes in the graph)
+        num_individuals: Estimated number of individuals (from top-k graph components)
+        predicted_f1: GMM threshold's predicted F1 (classifier quality indicator)
+    """
+    avg_sightings = num_nodes / max(1, num_individuals)
+    logger.info(f"Auto-computing stability parameters: num_nodes={num_nodes}, "
+                f"num_individuals(estimated)={num_individuals}, avg_sightings={avg_sightings:.2f}")
+
+    # initial_topk: auto = max(10, ceil(20 / avg_sightings))
+    if algorithm_config.get('initial_topk') == 'auto':
+        val = max(10, math.ceil(20 / max(avg_sightings, 1e-6)))
+        algorithm_config['initial_topk'] = val
+        logger.info(f"  Auto initial_topk = {val}")
+
+    # max_densify_edges: auto = min(1000, num_nodes * avg_sightings)
+    if stability_config.get('max_densify_edges') == 'auto':
+        val = min(1000, int(num_nodes * avg_sightings))
+        stability_config['max_densify_edges'] = val
+        logger.info(f"  Auto max_densify_edges = {val}")
+
+    # sparsify_on_init: auto = (avg_sightings > 3)
+    if stability_config.get('sparsify_on_init') == 'auto':
+        val = (avg_sightings > 3)
+        stability_config['sparsify_on_init'] = val
+        logger.info(f"  Auto sparsify_on_init = {val}")
+
+    # tries_before_edge_done: auto = ceil(1.0 / review_confidence)
+    if stability_config.get('tries_before_edge_done') == 'auto':
+        review_confidence = stability_config.get('review_confidence', 0.5)
+        val = math.ceil(1.0 / max(review_confidence, 1e-6))
+        stability_config['tries_before_edge_done'] = val
+        stability_config['_tries_was_auto'] = True
+        logger.info(f"  Auto tries_before_edge_done = {val}")
+
+    # max_phase0_iterations: auto = max(20, num_nodes // 100)
+    if stability_config.get('max_phase0_iterations') == 'auto':
+        val = max(20, num_nodes // 100)
+        stability_config['max_phase0_iterations'] = val
+        logger.info(f"  Auto max_phase0_iterations = {val}")
+
+    # review_confidence: auto = based on classifier predicted F1
+    # High predicted F1 means classifier is accurate, so reviews should be decisive
+    # Low predicted F1 means classifier is noisy, so reviews should be gradual
+    if stability_config.get('review_confidence') == 'auto':
+        if predicted_f1 is not None and predicted_f1 > 0:
+            # Map predicted F1 to review_confidence: F1=0.95+ -> 0.97, F1=0.7 -> 0.5
+            val = min(0.97, max(0.5, predicted_f1))
+            stability_config['review_confidence'] = val
+            logger.info(f"  Auto review_confidence = {val:.2f} (from predicted F1={predicted_f1:.4f})")
+        else:
+            stability_config['review_confidence'] = 0.5
+            logger.info(f"  Auto review_confidence = 0.5 (no predicted F1 available)")
+
+        # Recompute tries_before_edge_done if it was auto (depends on review_confidence)
+        if stability_config.get('tries_before_edge_done') == 'auto' or stability_config.get('_tries_was_auto'):
+            review_confidence = stability_config['review_confidence']
+            val = math.ceil(1.0 / max(review_confidence, 1e-6))
+            stability_config['tries_before_edge_done'] = val
+            logger.info(f"  Recomputed tries_before_edge_done = {val} (for review_confidence={review_confidence:.2f})")
+
+
 def prepare_stability(common_data, config):
     """
     Prepare LCA v3 (stability-driven) algorithm instance.
@@ -1023,6 +1152,36 @@ def prepare_stability(common_data, config):
     tries_before_edge_done = algorithm_params.get('tries_before_edge_done',
                                                  lca_config.get('iterations', {}).get('tries_before_edge_done', 4))
     stability_config["tries_before_edge_done"] = tries_before_edge_done
+
+    # Auto-compute parameters marked with 'auto' based on dataset statistics
+    num_nodes = len(common_data['node2uuid'])
+
+    # Estimate num_individuals from top-k graph connected components (no ground truth needed)
+    primary_embeddings = common_data['embeddings_dict'].get('miewid')
+    predicted_f1 = None
+    if primary_embeddings is not None:
+        if callable(primary_embeddings):
+            primary_embeddings = primary_embeddings()
+        # Get classifier threshold (already computed at this point)
+        cls_thresholds = config.get('edge_weights', {}).get('classifier_thresholds', {})
+        threshold_val = cls_thresholds.get('miewid', 0.7)
+        if isinstance(threshold_val, str) and 'auto' in threshold_val:
+            threshold_val = getattr(primary_embeddings, '_cached_gmm_threshold', 0.7)
+        threshold_val = float(threshold_val)
+        # Get predicted F1 from GMM (cached during threshold computation)
+        predicted_f1 = getattr(primary_embeddings, '_cached_gmm_predicted_f1', None)
+        topk = algorithm_params.get('initial_topk', 10)
+        if topk == 'auto':
+            topk = 10  # use default for estimation, will be recomputed
+        num_individuals = estimate_num_individuals_from_topk(primary_embeddings, threshold_val, topk=topk)
+    else:
+        num_individuals = num_nodes  # fallback: assume all singletons
+
+    auto_compute_stability_params(stability_config, algorithm_params, num_nodes, num_individuals, predicted_f1=predicted_f1)
+
+    # Update common_data with potentially auto-computed initial_topk
+    if 'initial_topk' in algorithm_params:
+        common_data['initial_topk'] = algorithm_params['initial_topk']
 
     logger.info(f"Stability algorithm config:")
     logger.info(f"  theta: {stability_config['theta']}")
@@ -1093,6 +1252,8 @@ def prepare_stability(common_data, config):
                     print_func=logger.info,
                     plot_path=robust_plot_path
                 )
+                # Cache predicted F1 for auto review_confidence computation
+                embeddings._cached_gmm_predicted_f1 = getattr(robust_gmm_find_threshold, '_last_predicted_f1', None)
 
         classifier = ThresholdBasedClassifier(threshold)
         logger.info(f"Created threshold-based classifier for {name} with threshold {threshold}")
