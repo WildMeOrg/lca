@@ -23,3 +23,4 @@ ui/node_modules
 *.pickle
 *.json
 *.zip
+.codex
