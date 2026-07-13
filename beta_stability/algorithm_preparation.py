@@ -374,7 +374,7 @@ def prepare_common(config):
         elif aug_name == 'ui_human':
             ui_db_path = data_params.get('ui_db_path')
             if ui_db_path:
-                from human_db import human_db
+                from beta_stability.util.human_db import human_db
                 logger.info(f"ui_human - using UI database for human reviews at {ui_db_path}")
                 human_reviewer = human_db(ui_db_path, filtered_df, node2uuid)
             else:
@@ -394,7 +394,7 @@ def prepare_common(config):
             # Old non-simulated case - try UI database
             ui_db_path = data_params.get('ui_db_path')
             if ui_db_path:
-                from human_db import human_db
+                from beta_stability.util.human_db import human_db
                 human_reviewer = human_db(ui_db_path, filtered_df, node2uuid)
             else:
                 human_reviewer = call_get_reviews(df, filter_key, prob_human_correct)

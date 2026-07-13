@@ -173,7 +173,7 @@ def save_pickle(x, file):
 
 def load_dataframe_lightweight(config):
     """Load dataframe without embeddings for field discovery."""
-    from preprocess import preprocess_data
+    from beta_stability.preprocess import preprocess_data
     
     data_params = config['data']
     
