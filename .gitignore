@@ -50,3 +50,5 @@ beta_stability/data/
 
 # Frontend (kept for legacy paths)
 ui/node_modules
+
+.claude
