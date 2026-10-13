@@ -28,7 +28,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import pairwise_distances
 from sklearn.preprocessing import normalize
 
-from beta_stability.util.cluster_tools import build_node_to_cluster_mapping
+from beta_stability.metrics.cluster_metrics import build_node_to_cluster_mapping
 
 logger = logging.getLogger("beta_stability")
 
@@ -62,16 +62,16 @@ class NISAlgorithm:
         self.n_nodes = 0
 
         # NIS parameters (N_v = vertices, N_n = neighbors per vertex)
-        self.N_v = config.get('n_sampled_vertices', 50)
-        self.N_n = config.get('m_neighbors_per_vertex', 100)
+        self.N_v = config['n_sampled_vertices']
+        self.N_n = config['m_neighbors_per_vertex']
 
         # Budget
         self.num_human_reviews = 0
-        self.max_human_reviews = config.get('max_human_reviews', 5000)
-        self.edges_per_review_batch = config.get('edges_per_review_batch', 200)
+        self.max_human_reviews = config['max_human_reviews']
+        self.edges_per_review_batch = config['edges_per_review_batch']
 
         # Validation
-        self.validation_step = config.get('validation_step', 100)
+        self.validation_step = config['validation_step']
         self.validation_initialized = False
 
         # NIS distributions (populated in _init_step)
@@ -119,10 +119,9 @@ class NISAlgorithm:
     def step(self, new_edges: List[Tuple]) -> List[Tuple[int, int, float]]:
         if self.phase == "INIT":
             return self._init_step(new_edges)
-        elif self.phase == "SAMPLING":
+        if self.phase == "SAMPLING":
             return self._sampling_step(new_edges)
-        else:
-            return []
+        return []
 
     def is_finished(self) -> bool:
         return (self.phase == "FINISHED" or
@@ -135,7 +134,7 @@ class NISAlgorithm:
             G.add_nodes_from(self.node_ids)
 
         if self.embeddings is not None:
-            for cid, nodes in self.clustering.items():
+            for nodes in self.clustering.values():
                 nodes_list = list(nodes)
                 if len(nodes_list) <= 10:
                     for i in range(len(nodes_list)):
@@ -195,7 +194,7 @@ class NISAlgorithm:
     # Phase: INIT
     # ------------------------------------------------------------------
 
-    def _init_step(self, new_edges):
+    def _init_step(self, new_edges):  # noqa: ARG002  (the algorithm interface)
         """Initialize: compute similarities, build proposals, pre-sample pairs.
 
         Follows the reference implementation exactly:
@@ -249,7 +248,7 @@ class NISAlgorithm:
         self.N_n = min(self.N_n, self.n_nodes)
         total_human_budget = self.N_v * (self.N_n - 1)
         if total_human_budget > self.max_human_reviews:
-            ratio = self.config.get('nis_nv_nn_ratio', 7)
+            ratio = self.config['nis_nv_nn_ratio']
             self.N_v = max(1, int(np.sqrt(self.max_human_reviews / ratio)))
             self.N_v = min(self.N_v, self.n_nodes, self.max_human_reviews)
             self.N_n = max(2, min(self.n_nodes,
@@ -281,15 +280,11 @@ class NISAlgorithm:
             # Reference: q = (s_ij[v_i]) / np.sum((s_ij[v_i]))
             q = self.s_ij[v_i].copy()
             q_sum = q.sum()
-            if q_sum > 0:
-                q = q / q_sum
-            else:
-                q = np.ones(self.n_nodes) / self.n_nodes
+            q = q / q_sum if q_sum > 0 else np.ones(self.n_nodes) / self.n_nodes
             self.q_all.append(q)
 
             # Self always first, then N_n-1 sampled neighbors (with replacement)
-            neighbors = [v_i] + list(np.random.choice(
-                self.n_nodes, size=self.N_n - 1, p=q, replace=True))
+            neighbors = [v_i, *list(np.random.choice(self.n_nodes, size=self.N_n - 1, p=q, replace=True))]
             self.sampled_neighbors.append(neighbors)
 
         # Step 6: Build flat pair list for human review (non-self pairs only)
@@ -582,9 +577,9 @@ class NISAlgorithm:
             self.validation_initialized = True
             return
 
-        if hasattr(self.cluster_validator, 'prev_num_human'):
-            if (self.num_human_reviews - self.cluster_validator.prev_num_human
-                    >= self.validation_step):
-                clustering, node2cid, G = self.get_clustering()
-                self.cluster_validator.trace_iter_compare_to_gt(
-                    clustering, node2cid, self.num_human_reviews, G)
+        if (hasattr(self.cluster_validator, 'prev_num_human')
+                and self.num_human_reviews - self.cluster_validator.prev_num_human
+                >= self.validation_step):
+            clustering, node2cid, G = self.get_clustering()
+            self.cluster_validator.trace_iter_compare_to_gt(
+                clustering, node2cid, self.num_human_reviews, G)

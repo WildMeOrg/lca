@@ -1,4 +1,4 @@
-import logging  # NOQA
+import logging
 import logging.config
 
 LOGGING_FORMAT = '%(levelname)-6s %(asctime)s [%(filename)18s:%(lineno)3d] %(message)s'
@@ -10,7 +10,6 @@ def get_formatter():
 
 def reset_logging():
     logger = logging.getLogger("beta_stability")
-    print(f"Resetting loggers: {logger}")
     handlers = logger.handlers[:]
     for handler in handlers:
         logger.removeHandler(handler)
@@ -21,7 +20,6 @@ def reset_logging():
     logger.handlers.clear()
 
 def init_logger():
-    print("INIT")
     reset_logging()
 
     root_logger = logging.getLogger()

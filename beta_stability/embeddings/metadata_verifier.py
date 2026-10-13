@@ -1,13 +1,11 @@
-import sqlite3
 import math
 import pandas as pd
-import os
 
-from pathlib import Path
 
 import numpy as np
 import time
 import logging
+import contextlib
 
 logger = logging.getLogger("beta_stability")
 
@@ -17,25 +15,24 @@ class MetadataEmbeddings:
     Embeddings wrapper that filters based on geographic/temporal metadata.
     Returns 0.0 for implausible matches, original score for plausible matches.
     """
-    
+
     def __init__(self, base_embeddings, data_df, node2uuid, id_key='uuid'):
         self.base_embeddings = base_embeddings
         self.metadata_filter = metadata_verifier(data_df, node2uuid, id_key)
-        
+
         logger.info(f"Created MetadataEmbeddings wrapping {type(base_embeddings).__name__}")
-    
+
     def _is_plausible(self, n0, n1):
         """Check if edge is plausible based on metadata."""
         plausible_pairs = self.metadata_filter([(n0, n1)])
         return len(plausible_pairs) > 0
-    
+
     def get_score(self, n0, n1):
         """Return 0.0 if implausible, base score if plausible."""
         if self._is_plausible(n0, n1):
             return self.base_embeddings.get_score(n0, n1)
-        else:
-            return 0.0
-    
+        return 0.0
+
     def _apply_metadata_filter_to_distmat(self, distmat, ids, start_idx):
         """Apply metadata filtering to distance matrix by setting implausible edges to infinity."""
         for i in range(distmat.shape[0]):
@@ -45,7 +42,7 @@ class MetadataEmbeddings:
                     if not self._is_plausible(id1, id2):
                         distmat[i, j] = 1
         return distmat
-    
+
     def get_edges(self, topk=5, target_edges=10000, target_proportion=None, uuids_filter=None):
         """
         Get edges filtered by metadata plausibility.
@@ -53,55 +50,55 @@ class MetadataEmbeddings:
         """
         start_time = time.time()
         print("Calculating distances with metadata filtering...")
-        
-        # Get distance matrix chunks from base embeddings  
+
+        # Get distance matrix chunks from base embeddings
         chunks, ids = self.base_embeddings.get_distmat_chunks(uuids_filter=uuids_filter)
         result = []
         start = 0
-        
+
         if target_proportion is None:
             embeds_num = len(ids)
             total_edges = (embeds_num * embeds_num - embeds_num) / 2
             target_proportion = np.clip(target_edges / total_edges, 0, 1)
         else:
             target_edges = int(total_edges * target_proportion)
-        
+
         print(f"Target: {target_edges}/{total_edges}")
-        
+
         for distmat in chunks:
             # FIRST: Apply metadata filtering to distance matrix
             distmat = self._apply_metadata_filter_to_distmat(distmat, ids, start)
-            
+
             # THEN: Apply top-k selection on filtered distance matrix
             sorted_dists = distmat.argsort(axis=1).argsort(axis=1) < topk
-            
+
             all_inds_y, all_inds_x = np.triu_indices(n=distmat.shape[0], m=distmat.shape[1], k=start+1)
             chunk_len = len(all_inds_y)
             order = np.random.permutation(chunk_len)[:int(chunk_len * target_proportion)]
             all_inds_y = all_inds_y[order]
             all_inds_x = all_inds_x[order]
-            
+
             selected_dists = np.full(distmat.shape, False)
             selected_dists[all_inds_y, all_inds_x] = True
 
             filtered = np.logical_or(sorted_dists, selected_dists)
             inds_y, inds_x = np.nonzero(filtered)
-            
+
             # Create edges from filtered distance matrix
-            for (ind1, ind2) in zip(inds_y, inds_x):
+            for (ind1, ind2) in zip(inds_y, inds_x, strict=True):
                 score = 1 - distmat[ind1, ind2]
                 if score > 0 and not np.isinf(score):  # Only valid edges
                     id1, id2 = ids[ind1 + start], ids[ind2]
                     result.append((*sorted([id1, id2]), score))
-            
+
             print(f"Chunk result: {time.time() - start_time:.6f} seconds")
             start_time = time.time()
             start += distmat.shape[0]
-            
+
         print(f"Calculated distances: {time.time() - start_time:.6f} seconds")
         print(f"Metadata filtered edges: {len(set(result))}")
         return set(result)
-    
+
     def __getattr__(self, name):
         """Delegate other methods to base embeddings."""
         return getattr(self.base_embeddings, name)
@@ -109,31 +106,30 @@ class MetadataEmbeddings:
     def get_base(self):
         """Return the unwrapped base embeddings for threshold computation."""
         return self.base_embeddings
-    
+
     def get_stats(self, df, filter_key, id_key='uuid'):
         """Get statistics with metadata filtering applied."""
-        start_time = time.time()
         print("Calculating distances with metadata filtering...")
         print(f"{len(self.base_embeddings.embeddings)}/{len(self.base_embeddings.ids)}")
-        
+
         # Get distance matrix chunks from base embeddings
         chunks, ids = self.base_embeddings.get_distmat_chunks()
         filtered_chunks = []
         start = 0
-        
+
         # Apply metadata filtering to each chunk
         for distmat in chunks:
             distmat = self._apply_metadata_filter_to_distmat(distmat, ids, start)
             filtered_chunks.append(distmat)
             start += distmat.shape[0]
-        
+
         # Concatenate filtered chunks
         distmat = np.concatenate(filtered_chunks, axis=0)
-        
+
         # Get labels and compute top-k statistics on filtered matrix
         labels = [df.loc[df[id_key] == self.base_embeddings.uuids[id], filter_key].values[0] for id in ids]
         top1, top3, top5, top10 = self.base_embeddings.get_top_ks(labels, distmat, ks=[1, 3, 5, 10])
-        
+
         return top1, top3, top5, top10
 
 class metadata_verifier(object):
@@ -171,10 +167,8 @@ class metadata_verifier(object):
             # Parse datetime
             dt_parsed = None
             if has_datetime:
-                try:
+                with contextlib.suppress(Exception):
                     dt_parsed = pd.to_datetime(row[datetime_col])
-                except Exception:
-                    pass
 
             # Get filename
             filename = str(row[filename_col]) if has_filename else ""

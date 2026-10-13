@@ -1,9 +1,15 @@
 ### TODO """preprocessing scripts - filtering, subsampling, splitting"""
 import json
+import logging
 import os
+
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
-from beta_stability.util.tools import *
+
+from beta_stability.data.io import (
+    EmptyDataframeException,
+    load_json,
+)
 
 
 logger = logging.getLogger("beta_stability")
@@ -24,7 +30,7 @@ def load_to_df(anno_path,format='standard', print_func=print):
         print_func('Merging on image uuid')
         df = dfa.merge(dfi, left_on='image_uuid', right_on='uuid', suffixes=('', '_y'))
     else:
-        df = dfa.merge(dfi, left_on='image_id', right_on='id', suffixes=('', '_y')) 
+        df = dfa.merge(dfi, left_on='image_id', right_on='id', suffixes=('', '_y'))
 
     if format == 'standard':
         df = df.merge(dfn, left_on='individual_uuid', right_on='uuid', suffixes=('', '_y'))
@@ -70,14 +76,18 @@ def filter_min_names_df(df, n_filter_min, filter_key='name_species', print_func=
     return df
 
 def filter_max_df(df, n_subsample_max, filter_key='name_species', print_func=print):
-    df = df.groupby(filter_key, as_index=False).apply(lambda g: g.sample(frac=1, random_state=0).head(n_subsample_max)).droplevel(level=0)
+    # Keep at most n per group, chosen by a seeded shuffle within the group.
+    # Done by index rather than groupby.apply because pandas changed both the
+    # index decoration and the visibility of the grouping column across versions.
+    keep = [i for _, group in df.groupby(filter_key)
+            for i in group.sample(frac=1, random_state=0).head(n_subsample_max).index]
+    df = df.loc[keep]
     print_func(f'      {len(df)} annotations remain after filtering by max {n_subsample_max} per {filter_key}')
     return df
 
 def convert_name_to_id(names):
     le = LabelEncoder()
-    names_id = le.fit_transform(names)
-    return names_id
+    return le.fit_transform(names)
 
 def filter_df(df, n_filter_min, n_subsample_max, embedding_uuids, filter_key='name', id_key='uuid', field_filters=None, print_func=print):
     if embedding_uuids:
@@ -88,47 +98,59 @@ def filter_df(df, n_filter_min, n_subsample_max, embedding_uuids, filter_key='na
         for field, values in field_filters.items():
             if values:  # Only filter if values are provided
                 df = filter_field_df(df, field, values, print_func=print_func)
-    
+
     if n_filter_min:
         df = filter_min_names_df(df, n_filter_min, filter_key=filter_key, print_func=print_func)
 
     if not len(df):
         raise EmptyDataframeException("No samples remain after filtering.")
-        
+
     if n_subsample_max:
         df = filter_max_df(df, n_subsample_max, filter_key=filter_key, print_func=print_func)
 
     return df
 
-def preprocess_data(anno_path, name_keys=['name'], 
-                    convert_names_to_ids=True, 
-                    n_filter_min=None, 
-                    n_filter_max=None, 
-                    images_dir=None, 
-                    embedding_uuids=None, 
-                    id_key='uuid', 
+def preprocess_data(anno_path, name_keys=('name',),
+                    convert_names_to_ids=True,
+                    n_filter_min=None,
+                    n_filter_max=None,
+                    images_dir=None,
+                    embedding_uuids=None,
+                    id_key='uuid',
                     format='standard',
                     field_filters=None,
                     print_func=print):
 
     df = load_to_df(anno_path, format, print_func=print_func)
 
-    filter_key = '__'.join(name_keys)
-    df[filter_key] = df[name_keys].apply(lambda row: '_'.join(row.values.astype(str)), axis=1)
-    
+    # Without name_keys the annotations carry no identity, so there is no
+    # column to group by and the per-individual filters do not apply.
+    filter_key = '__'.join(name_keys) if name_keys else None
+    if filter_key is not None:
+        missing = [key for key in name_keys if key not in df.columns]
+        if missing:
+            raise KeyError(
+                f"data.name_keys names {missing}, which the annotation file does "
+                f"not have. Its fields are {sorted(df.columns)}. Leave name_keys "
+                "unset to run without ground-truth identities.")
+        df[filter_key] = df[name_keys].apply(
+            lambda row: '_'.join(row.values.astype(str)), axis=1)
+    else:
+        if n_filter_min or n_filter_max:
+            print_func("No name_keys: skipping the per-individual count filters")
+        n_filter_min = n_filter_max = None
 
     df = filter_df(df, n_filter_min, n_filter_max, embedding_uuids, filter_key=filter_key, id_key=id_key, field_filters=field_filters, print_func=print_func)
 
-    if convert_names_to_ids:
+    if convert_names_to_ids and filter_key is not None:
         names = df[filter_key].values
         names_id = convert_name_to_id(names)
         df['name_id'] = names_id
     if images_dir is not None:
         df['file_path'] = df['file_name'].apply(lambda x: os.path.join(images_dir, x))
 
-    df = df.reset_index(drop=True)
+    return df.reset_index(drop=True)
 
-    return df
 
 
 def save_data(df, output_path, id_key='uuid'):

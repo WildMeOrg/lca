@@ -20,7 +20,7 @@ from collections import defaultdict
 import networkx as nx
 import numpy as np
 
-from beta_stability.util.tools import resolve_checkpoints, write_json, CHECKPOINT_LABEL
+from beta_stability.data.io import resolve_checkpoints, write_json, CHECKPOINT_LABEL
 
 logger = logging.getLogger("beta_stability")
 
@@ -34,20 +34,20 @@ class ReviewAlgorithm:
 
         # None => review every candidate (manual review). A value => accept above it
         # without review (thresholded review).
-        self.threshold = config.get('high_threshold')
-        self.topk = config.get('topk', 10)
-        self.max_reviews = config.get('max_reviews', None)
-        self.clustering_method = config.get('clustering_method', 'connected_components')
-        self.review_batch_size = config.get('review_batch_size', 100)
-        # Evaluation is periodic: every `eval_every_reviews` reviews (default:
-        # review_batch_size), plus once at the end, plus any exact checkpoints.
-        self.eval_every = int(config.get('eval_every_reviews', self.review_batch_size))
+        self.threshold = config['high_threshold']
+        self.topk = config['topk']
+        self.max_reviews = config['max_reviews']
+        self.clustering_method = config['clustering_method']
+        self.review_batch_size = config['review_batch_size']
+        # Evaluation is periodic: every `eval_every_reviews` reviews, plus once
+        # at the end, plus any exact checkpoints.
+        self.eval_every = int(config['eval_every_reviews'])
         self._last_eval_reviews = None
         self._queue_pos = 0
         self.required_outer_iterations = 0   # read by run.py: one review per step
 
         self.node2uuid = common_data['node2uuid']
-        self._checkpoints = set(resolve_checkpoints(config.get('report_at_reviews', ['N']),
+        self._checkpoints = set(resolve_checkpoints(config['report_at_reviews'],
                                                     len(self.node2uuid)))
         self.verifier_name = common_data['verifier_name']
         self.embeddings = common_data['embeddings_dict'][self.verifier_name]
@@ -67,7 +67,7 @@ class ReviewAlgorithm:
         self.uncertain_edges = []
         self.current_batch_idx = 0
         # Skip a pair once a confirmed path already connects its two annotations.
-        self.skip_redundant = bool(config.get('stop_at_match', True))
+        self.skip_redundant = bool(config['stop_at_match'])
         self._parent = {}
         self.remaining = None
 
@@ -197,7 +197,7 @@ class ReviewAlgorithm:
         batch_positive = 0
         batch_negative = 0
 
-        for n1, n2, score, source in edge_responses:
+        for n1, n2, score, _source in edge_responses:
             self.num_reviews += 1
             self.stats['num_human_reviews'] += 1
             self.human_reviewed.append((n1, n2, score))
@@ -333,7 +333,7 @@ class ReviewAlgorithm:
             raise ValueError(f"Unknown clustering method: {self.clustering_method}")
 
         # Add singleton clusters for isolated nodes
-        for node in self.node2uuid.keys():
+        for node in self.node2uuid:
             if node not in node2cid:
                 cid = str(len(clustering))
                 clustering[cid] = [node]

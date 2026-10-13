@@ -2,7 +2,7 @@
 # Beta-stability reference configuration.
 #
 # Run:
-#   python run_clustering_with_save.py \
+#   uv run python -m beta_stability \
 #       --base_config examples/beta_stability_config.yaml \
 #       --config path/to/your_data_config.yaml
 #
@@ -24,14 +24,12 @@ algorithm:
 
 stability:
   # Core algorithm hyperparameters
-  theta: 0.1
   target_alpha: 0.5
   phase0_alpha: 0.0
   max_human_reviews: 5000
   edges_per_review_batch: 200
   validation_step: 100
   review_confidence: auto      # auto = mapped from GMM predicted F1
-  tries_before_edge_done: auto
   max_phase0_iterations: auto
 
   # Silhouette-based auto-selection of the init verifier list.

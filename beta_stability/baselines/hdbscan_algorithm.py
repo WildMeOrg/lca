@@ -6,7 +6,7 @@ import numpy as np
 import hdbscan
 import networkx as nx
 import logging
-import beta_stability.util.cluster_tools as ct
+import beta_stability.metrics.cluster_metrics as ct
 
 logger = logging.getLogger("beta_stability")
 
@@ -36,18 +36,18 @@ class HDBSCANAlgorithm:
 
         # Get HDBSCAN-specific config
         hdbscan_config = config.get('hdbscan', {})
-        self.min_cluster_size = hdbscan_config.get('min_cluster_size', 2)
+        self.min_cluster_size = hdbscan_config['min_cluster_size']
         self.min_samples = hdbscan_config.get('min_samples', None)
-        self.metric = hdbscan_config.get('metric', 'euclidean')
-        self.cluster_selection_method = hdbscan_config.get('cluster_selection_method', 'eom')
-        self.cluster_selection_epsilon = hdbscan_config.get('cluster_selection_epsilon', 0.0)
-        self.allow_single_cluster = hdbscan_config.get('allow_single_cluster', False)
+        self.metric = hdbscan_config['metric']
+        self.cluster_selection_method = hdbscan_config['cluster_selection_method']
+        self.cluster_selection_epsilon = hdbscan_config['cluster_selection_epsilon']
+        self.allow_single_cluster = hdbscan_config['allow_single_cluster']
 
         # Get embeddings to use (default to first available verifier)
         self.verifier_name = hdbscan_config.get('verifier_name')
         if not self.verifier_name:
             # Use first non-human verifier
-            for name in embeddings_dict.keys():
+            for name in embeddings_dict:
                 if name != 'human':
                     self.verifier_name = name
                     break
@@ -94,7 +94,7 @@ class HDBSCANAlgorithm:
 
         # Handle single node case - HDBSCAN needs at least 2 points
         if len(embedding_vectors) == 1:
-            logger.info(f"Only one node found, creating single cluster")
+            logger.info("Only one node found, creating single cluster")
             self.clustering = {0: {valid_nodes[0]}}
             self.node2cid = ct.build_node_to_cluster_mapping(self.clustering)
             self._build_graph()
@@ -123,7 +123,7 @@ class HDBSCANAlgorithm:
         max_label = max(labels) if len(labels) > 0 and max(labels) >= 0 else -1
         next_singleton_id = max_label + 1
 
-        for node_id, label in zip(valid_nodes, labels):
+        for node_id, label in zip(valid_nodes, labels, strict=True):
             # HDBSCAN uses -1 for noise points, we'll put them in singleton clusters
             if label == -1:
                 cluster_id = next_singleton_id
@@ -178,7 +178,7 @@ class HDBSCANAlgorithm:
                 for j in range(i + 1, len(nodes_list)):
                     self.G.add_edge(nodes_list[i], nodes_list[j])
 
-    def step(self, new_edges):
+    def step(self, new_edges):  # noqa: ARG002  (the algorithm interface)
         """
         Process new edges (compatibility with iterative interface).
         HDBSCAN is non-iterative, so this just returns empty list.

@@ -10,24 +10,31 @@ import random
 import os
 import logging
 import datetime
-import tempfile
-import shutil
 import re
 from pathlib import Path
 
 
-from beta_stability.preprocess import preprocess_data
+from beta_stability.data.preprocess import preprocess_data
 from beta_stability.embeddings.embeddings import Embeddings
-from beta_stability.util.tools import *
-from beta_stability.util.cluster_validator import ClusterValidator
-from beta_stability.classifier_system import ClassifierManager, WeighterBasedClassifier, ThresholdBasedClassifier
+from beta_stability.edge_weights import reviewer
+from beta_stability.data.io import (
+    SingleAnnotationException,
+    generate_node2uuid,
+    generate_gt_clusters,
+    lazy,
+    load_pickle,
+    print_intersect_stats,
+)
+from beta_stability.init_logger import get_formatter
+from beta_stability.metrics.cluster_validator import ClusterValidator
+from beta_stability.edge_weights.classifier_system import ClassifierManager, ThresholdBasedClassifier
 from beta_stability.embeddings.metadata_verifier import MetadataEmbeddings
 from beta_stability.embeddings.tracking_id_verifier import TrackingIdEmbeddings
-from beta_stability.util.robust_gmm_threshold import find_threshold as robust_gmm_find_threshold
+from beta_stability.edge_weights.robust_gmm_threshold import find_threshold as robust_gmm_find_threshold
 from beta_stability.baselines.hdbscan_algorithm import HDBSCANAlgorithm
 from beta_stability.baselines.review_algorithm import ReviewAlgorithm
 from beta_stability.embeddings.kmeans_embeddings import KMeansEmbeddings
-from beta_stability.stability_algorithm import BetaStabilityAlgorithm
+from beta_stability.stability.algorithm import BetaStabilityAlgorithm
 from beta_stability.baselines.np3_aas_algorithm import NP3AASAlgorithm
 from beta_stability.baselines.nis_algorithm import NISAlgorithm
 
@@ -42,23 +49,23 @@ def _get_fallback_percentile(config):
     to start from a less fragmented graph.
     """
     edge_weights = config.get('edge_weights', {})
-    return float(edge_weights.get('fallback_percentile', 99))
+    return float(edge_weights['fallback_percentile'])
 
 logger = logging.getLogger("beta_stability")
 
 def parse_verifier_names(verifier_names):
     """
     Parse verifier names with metadata syntax.
-    
+
     Examples:
     - "metadata(miewid) lightglue human" → metadata wraps miewid explicitly
     - "metadata miewid human" → metadata wraps next verifier (miewid) implicitly
-    
+
     Returns:
     - parsed_verifiers: List of (verifier_name, base_embeddings_name) tuples
     """
     parsed_verifiers = []
-    
+
     meta_names = ['metadata', 'tracking', 'kmeans']
 
     i = 0
@@ -75,7 +82,7 @@ def parse_verifier_names(verifier_names):
                 parsed_verifiers.append((meta_name, base_name))
                 meta = True
                 break
-            elif current == meta_name:
+            if current == meta_name:
                 # Implicit: metadata uses next verifier as base
                 if i + 1 >= len(verifier_names):
                     raise ValueError(f"{meta_name} verifier needs a base verifier")
@@ -87,32 +94,32 @@ def parse_verifier_names(verifier_names):
         if not meta:
             parsed_verifiers.append((current, None))
         i += 1
-    
+
     return parsed_verifiers
 
 def prepare_common(config):
     """
     Handle all shared preparation tasks common to both algorithms.
-    
+
     Args:
         config: Configuration dictionary
-        
+
     Returns:
         dict: Common data needed by both algorithms
     """
-    seed = config.get('seed', 42)
+    seed = config['seed']
     np.random.seed(seed)
     random.seed(seed)
-    
+
     data_params = config['data']
     images_dir = data_params.get('images_dir', None)
     if images_dir == "None":
         images_dir = None
 
     data_params['images_dir'] = images_dir
-    algorithm_type = config.get('algorithm_type', 'stability')
+    algorithm_type = config['algorithm_type']
     algorithm_config = config.get(algorithm_type, {})
-    
+
     # 1. Resolve embeddings config and load all pickles.
     #
     # Config schema (new, preferred):
@@ -167,7 +174,7 @@ def prepare_common(config):
 
     # First-loaded embedding provides the canonical uuid ordering.
     uuid_source_name = next(iter(loaded_embeddings))
-    embeddings, uuids = loaded_embeddings[uuid_source_name]
+    uuids = loaded_embeddings[uuid_source_name][1]
     logger.info(
         f"Loaded {len(loaded_embeddings)} embedding(s): "
         f"{list(loaded_embeddings.keys())}; uuid ordering from '{uuid_source_name}'"
@@ -188,12 +195,14 @@ def prepare_common(config):
                 "All embeddings must cover the same set of uuids."
             )
 
+    # Null name_keys means the annotations carry no identities: the run
+    # clusters them and evaluates nothing.
     name_keys = data_params['name_keys']
-    filter_key = '__'.join(name_keys)
+    filter_key = '__'.join(name_keys) if name_keys else None
 
     # Support different preprocessing formats
-    format_type = data_params.get('format', 'drone')  # 'old' or 'drone'
-    id_key = data_params.get('id_key', 'uuid')
+    format_type = data_params['format']  # 'old' or 'drone'
+    id_key = data_params['id_key']
 
     # Create field_filters from any {field}_list entries in config
     field_filters = {}
@@ -216,24 +225,30 @@ def prepare_common(config):
         print_func=logger.info
     )
 
-    print_intersect_stats(df, individual_key=filter_key)
+    if filter_key is not None:
+        print_intersect_stats(df, individual_key=filter_key)
 
-    # 2. Setup ground truth and validation
-    logger.info("Setting up ground truth and validation...")
     filtered_df = df[df[id_key].isin(uuids)]
 
     # node2uuid mapping for ALL primary-pickle entries (used for thresholding).
-    all_node2uuid = {i: uuid for i, uuid in enumerate(uuids)}
+    all_node2uuid = dict(enumerate(uuids))
 
-
-    gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(filtered_df, filter_key, id_key)
+    if filter_key is None:
+        logger.info("No data.name_keys: running without ground truth, so no "
+                    "evaluation will be reported")
+        gt_clustering, gt_node2cid = None, None
+        node2uuid = generate_node2uuid(filtered_df, id_key)
+    else:
+        logger.info("Setting up ground truth and validation...")
+        gt_clustering, gt_node2cid, node2uuid = generate_gt_clusters(
+            filtered_df, filter_key, id_key)
 
     # Check for single annotation - no clustering needed
     if len(node2uuid) == 1:
         logger.info("Only 1 annotation found - skipping Beta Stability clustering")
         raise SingleAnnotationException(node2uuid, gt_clustering, gt_node2cid)
 
-    cluster_validator = ClusterValidator.from_config(
+    cluster_validator = None if gt_clustering is None else ClusterValidator.from_config(
         config, gt_clustering, gt_node2cid,
         default_method=algorithm_type,
         default_species=config.get('exp_name'),
@@ -243,7 +258,7 @@ def prepare_common(config):
     # 3. Per-embedding processing: filter to filtered_df row order, apply PCA,
     # register under its own name in embeddings_dict and unfiltered_embeddings_dict.
     logger.info("Setting up embeddings...")
-    distance_power = algorithm_config.get('distance_power', 1)
+    distance_power = algorithm_config['distance_power']
 
     embeddings_dict = {}
     unfiltered_embeddings_dict = {}
@@ -278,88 +293,55 @@ def prepare_common(config):
             config=config,
             algorithm_config=algorithm_config,
             embeddings_dict=embeddings_dict,
-            primary_name=algorithm_config.get('auto_verifier_primary', 'miewid'),
+            primary_name=algorithm_config['auto_verifier_primary'],
         )
 
     # 4. Setup human reviewer based on augmentation names (with backwards compatibility)
     logger.info("Setting up human reviewer...")
-    
+
     # Backwards compatibility: edge_weights can be top-level or inside algorithm config
     edge_weights = config.get('edge_weights', algorithm_config.get('edge_weights', {}))
-    algorithm_config['scorer'] = edge_weights.get('scorer', 'kde')
-    algorithm_config['prob_human_correct'] = edge_weights.get('prob_human_correct', 0.98)
-    
-    prob_human_correct = edge_weights.get('prob_human_correct', 0.98)
-    error_mode = edge_weights.get('error_mode', 'both')  # 'both'|'merge_only'|'split_only'
-    # aug_names = edge_weights.get('augmentation_names', 'miewid human').split()
-    verifier_name_raw = algorithm_config.get('verifier_name', 'miewid')
+    algorithm_config['scorer'] = edge_weights['scorer']
+    algorithm_config['prob_human_correct'] = edge_weights['prob_human_correct']
+
+    prob_human_correct = edge_weights['prob_human_correct']
+    error_mode = edge_weights['error_mode']  # 'both'|'merge_only'|'split_only'
+    # aug_names = edge_weights['augmentation_names'].split()
+    verifier_name_raw = algorithm_config['verifier_name']
     if isinstance(verifier_name_raw, list):
         init_verifiers = verifier_name_raw
     else:
         init_verifiers = verifier_name_raw.split()
     verifier_name = init_verifiers[0]  # Primary init verifier (backward compat)
 
-    verifier_names_str = edge_weights.get('verifier_names', edge_weights.get('augmentation_names', 'miewid human'))
+    verifier_names_str = edge_weights.get('verifier_names', edge_weights['augmentation_names'])
     aug_names = verifier_names_str.split() if isinstance(verifier_names_str, str) else verifier_names_str
     parsed_verifiers = parse_verifier_names(aug_names + init_verifiers)
 
-    # Backwards compatibility: handle old "human" + simulate_human flag
-    simulate_human = algorithm_config.get('simulate_human', True)
-    
-    # Determine human reviewer type
-    human_reviewer = None
-    
-    # New format: specific human types in aug_names
-    for aug_name in aug_names:
-        if aug_name == 'simulated_human':
-            human_reviewer = call_get_reviews(df, filter_key, prob_human_correct, error_mode)
-            break
-        elif aug_name == 'ui_human':
-            ui_db_path = data_params.get('ui_db_path')
-            if ui_db_path:
-                from beta_stability.util.human_db import human_db
-                logger.info(f"ui_human - using UI database for human reviews at {ui_db_path}")
-                human_reviewer = human_db(ui_db_path, filtered_df, node2uuid)
-            else:
-                logger.warning("ui_human specified but no ui_db_path provided, falling back to simulated")
-                human_reviewer = call_get_reviews(df, filter_key, prob_human_correct, error_mode)
-            break
-        elif aug_name == 'no_human':
-            logger.info("no_human - running without human reviews")
-            human_reviewer = lambda _: ([], False)
-            break
-    
-    # Backwards compatibility: handle old "human" in aug_names (from existing configs)
-    if human_reviewer is None and 'human' in aug_names:
-        if simulate_human:
-            human_reviewer = call_get_reviews(df, filter_key, prob_human_correct, error_mode)
-        else:
-            # Old non-simulated case - try UI database
-            ui_db_path = data_params.get('ui_db_path')
-            if ui_db_path:
-                from beta_stability.util.human_db import human_db
-                human_reviewer = human_db(ui_db_path, filtered_df, node2uuid)
-            else:
-                human_reviewer = call_get_reviews(df, filter_key, prob_human_correct, error_mode)
-    
-    # Final fallback: default to simulated if no human type found
-    if human_reviewer is None:
-        logger.info("No human reviewer type specified, defaulting to no_human")
-        human_reviewer = lambda _: ([], True)
-    
+    human_reviewer = reviewer.build(
+        aug_names,
+        df=df,
+        filtered_df=filtered_df,
+        node2uuid=node2uuid,
+        name_key=filter_key,
+        prob_human_correct=prob_human_correct,
+        error_mode=error_mode,
+        ui_db_path=data_params.get('ui_db_path'),
+        simulate_human=algorithm_config['simulate_human'],
+    )
+
     for name, base_name in parsed_verifiers:
         if name == 'metadata':
             # Create metadata wrapper
             base_embeddings = embeddings_dict[base_name]()
-            embeddings_dict[f'metadata({base_name})'] = lazy(lambda: MetadataEmbeddings(
-                base_embeddings, df, node2uuid)
-            )
+            embeddings_dict[f'metadata({base_name})'] = lazy(
+                lambda base=base_embeddings: MetadataEmbeddings(base, df, node2uuid))
         elif name == 'tracking':
             # Create tracking ID wrapper
             base_embeddings = embeddings_dict[base_name]()
-            embeddings_dict[f'tracking({base_name})'] = lazy(lambda: TrackingIdEmbeddings.from_embeddings(
-                base_embeddings, df, node2uuid, id_key, tracking_key='tracking_id', multiplier=1)
-            )
+            embeddings_dict[f'tracking({base_name})'] = lazy(
+                lambda base=base_embeddings: TrackingIdEmbeddings.from_embeddings(
+                    base, df, node2uuid, id_key, tracking_key='tracking_id', multiplier=1))
         elif name == 'kmeans':
             # Compute base embeddings threshold using classifier config
             base_embeddings = embeddings_dict[base_name]()
@@ -369,8 +351,8 @@ def prepare_common(config):
             # cap K_hat downstream, so the GMM rejects fits whose threshold
             # implies K > n / kmeans_min_cluster_size (a degenerate K_hat).
             stability_cfg = config.get('stability', {})
-            kmeans_min_cluster_size = stability_cfg.get('kmeans_min_cluster_size', 1)
-            kmeans_fallback_cluster_size = stability_cfg.get('kmeans_fallback_cluster_size', 1)
+            kmeans_min_cluster_size = stability_cfg['kmeans_min_cluster_size']
+            kmeans_fallback_cluster_size = stability_cfg['kmeans_fallback_cluster_size']
             n_nodes = len(base_embeddings.ids)
             kmeans_max_k = n_nodes // kmeans_min_cluster_size if kmeans_min_cluster_size > 1 else None
             if isinstance(base_spec, str) and 'auto' in base_spec:
@@ -407,32 +389,28 @@ def prepare_common(config):
                     return fallback_emb
                 return km
             embeddings_dict[f'kmeans({base_name})'] = lazy(_make_kmeans)
-    logger.info("Computing and logging verifier performance statistics...")
-    primary_verifier_embeddings = embeddings_dict[verifier_name]()
-    
-    try:
-        # Log top-k accuracy statistics  
-        topk_results = primary_verifier_embeddings.get_stats(filtered_df, filter_key, id_key)
-        logger.info(f"Top-k Accuracy Statistics: " + ", ".join([f"{k}: {100*v:.2f}%" for (k, v) in topk_results]))
-
-        # Log detailed top-20 matches for each individual
-        # top20_results = primary_verifier_embeddings.get_top20_matches(filtered_df, filter_key)
-        # for uuid, top20 in top20_results.items():
-        #     logger.info(f"ID: {uuid} | TOP-20: " + ", ".join([f"{k}: {v:.2f}" for (k, v) in top20]))
-            
-    except Exception as e:
-        logger.warning(f"Failed to compute verifier statistics: {e}")
-        logger.info("Continuing without statistics logging")
+    # Top-k accuracy is measured against the identities, so it needs them.
+    if filter_key is None:
+        logger.info("No ground truth: skipping verifier top-k statistics")
+    else:
+        logger.info("Computing and logging verifier performance statistics...")
+        try:
+            topk_results = embeddings_dict[verifier_name]().get_stats(
+                filtered_df, filter_key, id_key)
+            logger.info("Top-k Accuracy Statistics: "
+                        + ", ".join(f"{k}: {100 * v:.2f}%" for k, v in topk_results))
+        except Exception as e:
+            logger.warning(f"Failed to compute verifier statistics: {e}")
+            logger.info("Continuing without statistics logging")
 
     for aug_name in aug_names:
         if 'human' not in aug_name:
             embeddings_dict[aug_name] = embeddings_dict[aug_name]()
     for iv_name in init_verifiers:
-        if iv_name not in aug_names:
-            if callable(embeddings_dict.get(iv_name)):
-                embeddings_dict[iv_name] = embeddings_dict[iv_name]()
-    
-    algorithm_type = config.get('algorithm_type', 'stability')
+        if iv_name not in aug_names and callable(embeddings_dict.get(iv_name)):
+            embeddings_dict[iv_name] = embeddings_dict[iv_name]()
+
+    algorithm_type = config['algorithm_type']
 
     weighters = {}
     weighters_calibration = None
@@ -444,10 +422,10 @@ def prepare_common(config):
         output_path = 'tmp'
 
     algorithm_params = config.get('algorithm', {})
-    target_edges = algorithm_params.get('target_edges', 0)
+    target_edges = algorithm_params['target_edges']
     target_proportion = algorithm_params.get('target_proportion', None)
-    initial_topk = algorithm_params.get('initial_topk', 10)
-    initial_botk = algorithm_params.get('initial_botk', 0)
+    initial_topk = algorithm_params['initial_topk']
+    initial_botk = algorithm_params['initial_botk']
 
 
     # 9. Return common data
@@ -474,119 +452,24 @@ def prepare_common(config):
     }
 
 
-def generate_weighter_calibration(embeddings_dict, human_reviewer, edge_weights, verifier_name, aug_names, logger, config=None):
-    """
-    Generate calibration data for weighters with caching support.
-    
-    Args:
-        config: Full configuration dict for accessing cache settings and db_path
-        
-    Returns:
-        dict: Calibration data for all embedding methods
-    """
-    # Determine cache file location
-    cache_file = None
-    if 'verifier_file' in edge_weights:
-        # Use specified cache file
-        cache_file = edge_weights['verifier_file']
-        logger.info(f"Using specified cache file: {cache_file}")
-    logger.info(os.path.exists(cache_file))
-    # Try to load cached calibration
-    if cache_file and os.path.exists(cache_file):
-        logger.info(f"Loading cached weighter calibration from {cache_file}")
-        try:
-            return load_json(cache_file)
-        except Exception as e:
-            logger.warning(f"Failed to load cache file {cache_file}: {e}")
-            logger.info("Proceeding with fresh calibration computation")
-    
-    # Compute calibration (existing logic)
-    logger.info("Computing weighter calibration...")
-    num_pos_needed = edge_weights.get('num_pos_needed', 300)
-    num_neg_needed = edge_weights.get('num_neg_needed', 50)
-    
-    wgtrs_calib_dict = {}
-    
-    # Get verifier edges for calibration
-    verifier_edges = embeddings_dict[verifier_name].get_edges()
-    
-    # Generate ground truth for main verifier
-    logger.info(f"Generating calibration data for {verifier_name}...")
-    gt_weights, pos_edges, neg_edges = process_verifier_edges(
-        verifier_name, verifier_edges, human_reviewer, num_pos_needed, num_neg_needed, logger
-    )
-    wgtrs_calib_dict[verifier_name] = gt_weights
-    
-    # Generate calibration for other methods (excluding human reviewer types)
-    human_types = {'simulated_human', 'ui_human', 'no_human', 'human'}  # Include old 'human' for compatibility
-    for method in aug_names:
-        if method in human_types or method == verifier_name:
-            continue
-            
-        if method not in embeddings_dict:
-            logger.warning(f"Embeddings for method {method} not found.")
-            continue
-            
-        logger.info(f"Generating calibration data for {method}...")
-        get_score = embeddings_dict[method].get_score
-        wgtrs_calib_dict[method] = process_edges(method, pos_edges, neg_edges, get_score, logger)
-    
-    # Save to cache
-    if cache_file:
-        try:
-            # Use the same save function as the old system
-            def save_probs_to_db(data, output_path):
-                dir_name = os.path.dirname(output_path)
-                if not os.path.exists(dir_name):
-                    os.makedirs(dir_name)
-                write_json(data, output_path)
-            
-            save_probs_to_db(wgtrs_calib_dict, cache_file)
-            logger.info(f"Saved weighter calibration to {cache_file}")
-        except Exception as e:
-            logger.warning(f"Failed to save cache file {cache_file}: {e}")
-    
-    return wgtrs_calib_dict
-
-
-def process_verifier_edges(method, edges, human_reviewer, num_pos_needed, num_neg_needed, logger):
-    """Generate ground truth random data and update the calibration dictionary."""
-    pos, neg, quit = generate_ground_truth_random(edges, human_reviewer, num_pos_needed, num_neg_needed)
-    logger.info(f"Method: {method}, Num pos edges: {len(pos)}, num neg edges: {len(neg)}")
-    return {
-        "gt_positive_probs": [p for _, _, p in pos],
-        "gt_negative_probs": [p for _, _, p in neg],
-    }, pos, neg
-
-
-def process_edges(method, pos_edges, neg_edges, get_score, logger):
-    """Generate ground truth random data and update the calibration dictionary."""
-    pos, neg = generate_calib_weights(pos_edges, neg_edges, get_score)
-    logger.info(f"Method: {method}, Num pos edges: {len(pos)}, num neg edges: {len(neg)}")
-    return {
-        "gt_positive_probs": [p for _, _, p in pos],
-        "gt_negative_probs": [p for _, _, p in neg],
-    }
-
-
 def setup_logging(config):
     """
     Setup logging configuration with backwards compatibility.
     """
     # exp_name = config.get('exp_name', "")
     algorithm_config = {}
-    
+
     # Backwards compatibility: logging can be top-level or inside algorithm config
     logging_config = config.get('logging', algorithm_config.get('logging', {}))
-    
+
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    
-    log_level = logging_config.get('log_level', 'INFO')
+
+
+    log_level = logging_config['log_level']
     log_file = logging_config.get('log_file')
-    
+
     if log_file is not None:
-        if logging_config.get("update_log_file", True):
+        if logging_config['update_log_file']:
             log_file_name = Path(log_file)
             log_file_name = log_file_name.with_name(log_file_name.stem + f'_{timestamp}' + log_file_name.suffix)
             logging_config['log_file'] = log_file_name
@@ -598,14 +481,63 @@ def setup_logging(config):
             handler.flush()
             handler.close()
 
-        file_mode = logging_config.get("file_mode", 'w')
+        file_mode = logging_config['file_mode']
+        # a fresh config names a log file in a directory that does not exist yet
+        os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
         handler = logging.FileHandler(log_file, mode=file_mode)
         handler.setLevel(log_level)
         handler.setFormatter(get_formatter())
         logger.addHandler(handler)
-        
+
         # print(f"Logging to {os.path.abspath(log_file)}")
     return log_file, timestamp
+
+
+def get_initial_edges(common_data, config):
+    """Collect the initial edges, in order, from every initialization verifier.
+
+    Edges come from each verifier's top-k and bottom-k neighbourhoods, from a
+    random proportion, and from the certain tails on either side of the
+    classifier threshold when margins are configured. The first verifier to
+    propose a pair owns it.
+    """
+    init_verifiers = common_data.get('init_verifiers', [common_data['verifier_name']])
+    algorithm_params = config['algorithm']
+
+    lower_threshold = upper_threshold = None
+    classifier_threshold = common_data.get('classifier_threshold')
+    if classifier_threshold is not None:
+        margin = algorithm_params.get('threshold_margin')
+        lower_margin = algorithm_params.get('lower_threshold_margin', margin)
+        upper_margin = algorithm_params.get('upper_threshold_margin', margin)
+        if lower_margin is not None:
+            lower_threshold = classifier_threshold - lower_margin
+            logger.info(f"Using lower_threshold={lower_threshold:.4f} "
+                        f"(classifier={classifier_threshold:.4f} - margin={lower_margin})")
+        if upper_margin is not None:
+            upper_threshold = classifier_threshold + upper_margin
+            logger.info(f"Using upper_threshold={upper_threshold:.4f} "
+                        f"(classifier={classifier_threshold:.4f} + margin={upper_margin})")
+
+    all_edges, seen_pairs = [], set()
+    for verifier_name in init_verifiers:
+        raw_edges = list(common_data['embeddings_dict'][verifier_name].get_edges(
+            target_edges=common_data['target_edges'],
+            topk=common_data['initial_topk'],
+            botk=common_data['initial_botk'],
+            target_proportion=common_data['target_proportion'],
+            lower_threshold=lower_threshold,
+            upper_threshold=upper_threshold,
+        ))
+        new_count = 0
+        for edge in raw_edges:
+            pair = (edge[0], edge[1])
+            if pair not in seen_pairs:
+                seen_pairs.add(pair)
+                all_edges.append((*edge, verifier_name))
+                new_count += 1
+        logger.info(f"Init verifier '{verifier_name}': {len(raw_edges)} edges, {new_count} new")
+    return all_edges
 
 
 def create_algorithm(config):
@@ -617,7 +549,7 @@ def create_algorithm(config):
     common_data = prepare_common(config)
     common_data['timestamp'] = timestamp
 
-    algorithm_type = config.get('algorithm_type', 'stability')
+    algorithm_type = config['algorithm_type']
 
     if algorithm_type == 'hdbscan':
         algorithm = prepare_hdbscan(common_data, config)
@@ -655,10 +587,7 @@ def prepare_hdbscan(common_data, config):
     # Get embeddings dictionary
     embeddings_dict = common_data['embeddings_dict']
 
-    # Create and return HDBSCAN instance
-    hdbscan_instance = HDBSCANAlgorithm(config, all_nodes, embeddings_dict)
-
-    return hdbscan_instance
+    return HDBSCANAlgorithm(config, all_nodes, embeddings_dict)
 
 
 def prepare_manual_review(common_data, config):
@@ -813,7 +742,7 @@ def _auto_select_stability_verifier(config, algorithm_config, embeddings_dict,
     Returns:
         list[str]: verifier_name list to use.
     """
-    silhouette_threshold = algorithm_config.get('auto_verifier_silhouette_threshold', 0.15)
+    silhouette_threshold = algorithm_config['auto_verifier_silhouette_threshold']
     # High-silhouette branch = the code/config baseline: just the primary
     # verifier. Low-silhouette branch = kmeans-only init.
     default_list = [primary_name]
@@ -861,7 +790,7 @@ def _auto_select_stability_verifier(config, algorithm_config, embeddings_dict,
     G.add_nodes_from(range(N))
     pos_mask = scores > tau
     if pos_mask.any():
-        G.add_edges_from(zip(iu[pos_mask].tolist(), iv[pos_mask].tolist()))
+        G.add_edges_from(zip(iu[pos_mask].tolist(), iv[pos_mask].tolist(), strict=True))
     K_hat = nx.number_connected_components(G)
     logger.info(
         f"AUTO VERIFIER: primary='{primary_name}', τ={tau:.4f}, K̂={K_hat}, "
@@ -925,7 +854,7 @@ def coverage_auto_topk(k_hat, coverage=0.9, n_nodes=None):
         return max(10, k_hat)
     if not (0.0 < coverage < 1.0):
         raise ValueError(f"coverage must be in (0, 1), got {coverage}")
-    k = int(math.ceil(-math.log(1.0 - coverage) * k_hat))
+    k = math.ceil(-math.log(1.0 - coverage) * k_hat)
     k = max(10, k)
     if n_nodes is not None:
         k = min(k, n_nodes - 1)
@@ -934,8 +863,8 @@ def coverage_auto_topk(k_hat, coverage=0.9, n_nodes=None):
 
 
 
-def auto_compute_stability_params(stability_config, algorithm_config, num_nodes, num_individuals, predicted_f1=None,
-                                  gmm_components=None, classifier_threshold=None, prob_human_correct=None):
+def auto_compute_stability_params(stability_config, algorithm_params, num_nodes,
+                                  num_individuals, prob_human_correct=None):
     """
     Auto-compute stability parameters marked with 'auto' in the config.
 
@@ -944,7 +873,7 @@ def auto_compute_stability_params(stability_config, algorithm_config, num_nodes,
 
     Args:
         stability_config: Stability section of the config (modified in-place)
-        algorithm_config: Algorithm section of the config (modified in-place)
+        algorithm_params: Algorithm section of the config (modified in-place)
         num_nodes: Number of annotations (nodes in the graph)
         num_individuals: Estimated number of individuals (from top-k graph components)
         predicted_f1: GMM threshold's predicted F1 (classifier quality indicator)
@@ -956,8 +885,8 @@ def auto_compute_stability_params(stability_config, algorithm_config, num_nodes,
     # initial_topk: auto uses the coupon-collector K = -ln(1-coverage)·K̂,
     # with K̂ from count_pccs_from_all_positives (independent of top-K).
     # Falls back to the legacy avg_sightings heuristic if K̂ is unavailable.
-    if algorithm_config.get('initial_topk') == 'auto':
-        coverage = algorithm_config.get('auto_topk_coverage', 0.9)
+    if algorithm_params.get('initial_topk') == 'auto':
+        coverage = algorithm_params['auto_topk_coverage']
         if num_individuals and num_individuals > 1:
             val = coverage_auto_topk(num_individuals, coverage=coverage,
                                      n_nodes=num_nodes)
@@ -972,19 +901,7 @@ def auto_compute_stability_params(stability_config, algorithm_config, num_nodes,
                 f"  Auto initial_topk = {val}  (legacy avg-sightings "
                 f"heuristic; K̂ unavailable)"
             )
-        algorithm_config['initial_topk'] = val
-
-    # max_densify_edges: auto = min(1000, num_nodes * avg_sightings)
-    if stability_config.get('max_densify_edges') == 'auto':
-        val = min(1000, int(num_nodes * avg_sightings))
-        stability_config['max_densify_edges'] = val
-        logger.info(f"  Auto max_densify_edges = {val}")
-
-    # sparsify_on_init: auto = (avg_sightings > 3)
-    if stability_config.get('sparsify_on_init') == 'auto':
-        val = (avg_sightings > 3)
-        stability_config['sparsify_on_init'] = val
-        logger.info(f"  Auto sparsify_on_init = {val}")
+        algorithm_params['initial_topk'] = val
 
     # max_phase0_iterations: auto = max(20, num_nodes // 100)
     if stability_config.get('max_phase0_iterations') == 'auto':
@@ -1009,7 +926,7 @@ def auto_compute_stability_params(stability_config, algorithm_config, num_nodes,
         p = float(prob_human_correct)
         # N = number of candidate edges ~ num_nodes * top-K (K resolved just above).
         try:
-            topk = int(algorithm_config.get('initial_topk', 10))
+            topk = int(algorithm_params['initial_topk'])
         except (TypeError, ValueError):
             topk = 10
         num_edges = max(int(num_nodes) * max(topk, 1), 3)
@@ -1043,26 +960,14 @@ def prepare_stability(common_data, config):
     Returns:
         BetaStabilityAlgorithm: Configured stability algorithm instance
     """
-    # Get stability-specific config, falling back to gc config for compatibility
-    stability_config = config.get('stability', config.get('gc', {})).copy()
+    # The algorithm's parameters, every one of them declared with its default
+    # in the stability section of beta_stability.config.DEFAULTS.
+    stability_config = dict(config['stability'])
 
-    # Merge edge_weights settings
+    # The reviewer's accuracy belongs to the edge weights, but the algorithm
+    # needs it to score the reviews it simulates against ground truth.
     edge_weights = config.get('edge_weights', {})
-    stability_config['prob_human_correct'] = edge_weights.get('prob_human_correct', 0.98)
-
-    # Get parameters from various config sections
-    stability_config['target_alpha'] = stability_config.get('target_alpha', 0.5)  # [0, 1] scale
-    stability_config['max_human_reviews'] = stability_config.get('max_human_reviews', 1000)
-    stability_config['review_confidence'] = stability_config.get('review_confidence', 0.97)  # [0, 1] scale
-    stability_config['edges_per_review_batch'] = stability_config.get('edges_per_review_batch', 200)
-    stability_config['validation_step'] = stability_config.get('validation_step', 100)
-    stability_config['max_densify_edges'] = stability_config.get('max_densify_edges', 2000)
-    stability_config['cross_pcc_max_edges'] = stability_config.get('cross_pcc_max_edges', 10000)
-
-    # Phase 0 aggressiveness controls
-    stability_config['phase0_alpha'] = stability_config.get('phase0_alpha', 0.0)  # 0.0 = strict, -0.1 = lenient
-    stability_config['max_phase0_iterations'] = stability_config.get('max_phase0_iterations', 20)
-    stability_config['densify_prioritize_negatives'] = stability_config.get('densify_prioritize_negatives', False)
+    stability_config['prob_human_correct'] = edge_weights['prob_human_correct']
 
     algorithm_params = config.get("algorithm", {})
 
@@ -1073,11 +978,10 @@ def prepare_stability(common_data, config):
     # Use the user's chosen primary verifier (first entry in verifier_name) so this
     # works for any embedding (miewid, megadescriptor, etc.) — falls back to 'miewid'
     # for legacy configs.
-    primary_verifier = common_data.get('verifier_name', 'miewid')
+    primary_verifier = common_data['verifier_name']
     primary_embeddings = common_data['embeddings_dict'].get(primary_verifier)
     if primary_embeddings is None:
         primary_embeddings = common_data['embeddings_dict'].get('miewid')
-    predicted_f1 = None
     if primary_embeddings is not None:
         if callable(primary_embeddings):
             primary_embeddings = primary_embeddings()
@@ -1103,7 +1007,7 @@ def prepare_stability(common_data, config):
                     thresh_embeddings = thresh_embeddings()
                 if hasattr(primary_embeddings, 'get_base'):
                     thresh_embeddings = primary_embeddings.get_base()
-                _kmeans_min_cluster_size = stability_config.get('kmeans_min_cluster_size', 1)
+                _kmeans_min_cluster_size = stability_config['kmeans_min_cluster_size']
                 _n_nodes = len(primary_embeddings.ids) if hasattr(primary_embeddings, 'ids') else None
                 _max_implied_K = (_n_nodes // _kmeans_min_cluster_size
                                   if (_kmeans_min_cluster_size > 1 and _n_nodes) else None)
@@ -1125,9 +1029,7 @@ def prepare_stability(common_data, config):
                 )
         else:
             threshold_val = float(threshold_spec)
-        # Get predicted F1 from GMM (cached during threshold computation)
-        predicted_f1 = getattr(primary_embeddings, '_cached_gmm_predicted_f1', None)
-        topk = algorithm_params.get('initial_topk', 10)
+        topk = algorithm_params['initial_topk']
         if topk == 'auto':
             # K̂ from all classifier-positive pairs — no top-K choice needed
             # (breaks the circularity of "need K to estimate K̂ to pick K").
@@ -1145,39 +1047,36 @@ def prepare_stability(common_data, config):
     # LR-calibrated review_confidence model can place a verdict on its scale.
     _gmm_components = getattr(robust_gmm_find_threshold, '_last_components', None)
     _classifier_threshold = threshold_val if primary_embeddings is not None else None
-    _prob_human_correct = config.get('edge_weights', {}).get('prob_human_correct', 1.0)
-    auto_compute_stability_params(stability_config, algorithm_params, num_nodes, num_individuals,
-                                  predicted_f1=predicted_f1,
-                                  gmm_components=_gmm_components,
-                                  classifier_threshold=_classifier_threshold,
+    _prob_human_correct = config['edge_weights']['prob_human_correct']
+    auto_compute_stability_params(stability_config, algorithm_params, num_nodes,
+                                  num_individuals,
                                   prob_human_correct=_prob_human_correct)
 
     # Update common_data with potentially auto-computed initial_topk
     if 'initial_topk' in algorithm_params:
         common_data['initial_topk'] = algorithm_params['initial_topk']
 
-    logger.info(f"Stability algorithm config:")
+    logger.info("Stability algorithm config:")
     logger.info(f"  target_alpha: {stability_config['target_alpha']}")
     logger.info(f"  phase0_alpha: {stability_config['phase0_alpha']}")
     logger.info(f"  max_human_reviews: {stability_config['max_human_reviews']}")
     logger.info(f"  review_confidence: {stability_config['review_confidence']}")
-
-    logger.info(f"  densify_prioritize_negatives: {stability_config['densify_prioritize_negatives']}")
     # Build classifier manager (reuse GC's classifier setup)
-    verifier_names_str = edge_weights.get('verifier_names', edge_weights.get('augmentation_names', 'miewid human'))
+    verifier_names_str = edge_weights.get('verifier_names', edge_weights['augmentation_names'])
     verifier_names = verifier_names_str.split() if isinstance(verifier_names_str, str) else verifier_names_str
 
     classifier_thresholds = edge_weights.get('classifier_thresholds', {})
     classifier_units = {}
 
-    do_robust_plot = "auto_threshold_plot_path" in config.get("logging", {})
-    robust_plot_path = config.get("logging", {}).get("auto_threshold_plot_path", "dist.png")
+    # None means no plot. Defaulting to a filename wrote one into whatever
+    # directory the run started from.
+    robust_plot_path = config.get("logging", {}).get("auto_threshold_plot_path")
 
     # K-degeneracy guard: reject GMM thresholds whose implied K exceeds
     # n / kmeans_min_cluster_size (the same cluster-size assumption used to
     # cap k-means K_hat). Triggers on weakly-separated embeddings where the
     # GMM hallucinates a microscopic right-tail positive component.
-    _kmeans_min_cluster_size = stability_config.get('kmeans_min_cluster_size', 1)
+    _kmeans_min_cluster_size = stability_config['kmeans_min_cluster_size']
 
     def _max_implied_K_for(embeddings):
         if _kmeans_min_cluster_size <= 1:
@@ -1314,7 +1213,7 @@ def prepare_stability(common_data, config):
     # Ablation runs opt into the isolated ablation module living in the
     # repo-root `internal/` directory (kept out of the shipped package but
     # loadable at runtime when explicitly requested).
-    if stability_config.get('use_ablation_module', False):
+    if stability_config['use_ablation_module']:
         import sys as _sys
         _internal_dir = os.path.abspath(
             os.path.join(os.path.dirname(__file__), '..', 'internal')
@@ -1327,13 +1226,11 @@ def prepare_stability(common_data, config):
         )
     else:
         _StabilityAlgo = BetaStabilityAlgorithm
-    stability_instance = _StabilityAlgo(
+    return _StabilityAlgo(
         stability_config,
         classifier_manager=classifier_manager,
-        cluster_validator=common_data['cluster_validator']
+        cluster_validator=common_data['cluster_validator'],
     )
-
-    return stability_instance
 
 
 def prepare_np3_aas(common_data, config):
@@ -1351,7 +1248,7 @@ def prepare_np3_aas(common_data, config):
 
     # Merge edge_weights settings
     edge_weights = config.get('edge_weights', {})
-    np3_config['prob_human_correct'] = edge_weights.get('prob_human_correct', 0.98)
+    np3_config['prob_human_correct'] = edge_weights['prob_human_correct']
 
     # Set defaults
     np3_config.setdefault('max_human_reviews', 5000)
@@ -1367,14 +1264,15 @@ def prepare_np3_aas(common_data, config):
 
     # Build classifier manager (same pattern as prepare_stability)
     verifier_names_str = edge_weights.get('verifier_names',
-                                          edge_weights.get('augmentation_names', 'miewid human'))
+                                          edge_weights['augmentation_names'])
     verifier_names = verifier_names_str.split() if isinstance(verifier_names_str, str) else verifier_names_str
 
     classifier_thresholds = edge_weights.get('classifier_thresholds', {})
     classifier_units = {}
 
-    do_robust_plot = "auto_threshold_plot_path" in config.get("logging", {})
-    robust_plot_path = config.get("logging", {}).get("auto_threshold_plot_path", "dist.png")
+    # None means no plot. Defaulting to a filename wrote one into whatever
+    # directory the run started from.
+    robust_plot_path = config.get("logging", {}).get("auto_threshold_plot_path")
 
     # Process direct thresholds
     for name in classifier_thresholds:
@@ -1447,13 +1345,13 @@ def prepare_np3_aas(common_data, config):
 
     # Pass the classifier threshold to the algorithm config so it can
     # derive dbscan_eps='auto' from it (similarity -> cosine distance)
-    verifier_name = np3_config.get('verifier_name', 'miewid')
+    verifier_name = np3_config['verifier_name']
     if verifier_name in classifier_units:
         _, classifier_obj = classifier_units[verifier_name]
         np3_config['classifier_threshold'] = classifier_obj.threshold
         logger.info(f"Classifier threshold for {verifier_name}: {classifier_obj.threshold:.4f}")
 
-    logger.info(f"NP3+AAS algorithm config:")
+    logger.info("NP3+AAS algorithm config:")
     logger.info(f"  dbscan_eps: {np3_config['dbscan_eps']}")
     logger.info(f"  dbscan_min_samples: {np3_config['dbscan_min_samples']}")
     logger.info(f"  s_min: {np3_config['s_min']}")
@@ -1487,7 +1385,7 @@ def prepare_nis(common_data, config):
 
     # Merge edge_weights settings
     edge_weights = config.get('edge_weights', {})
-    nis_config['prob_human_correct'] = edge_weights.get('prob_human_correct', 0.98)
+    nis_config['prob_human_correct'] = edge_weights['prob_human_correct']
 
     # Set defaults
     nis_config.setdefault('n_sampled_vertices', 50)
@@ -1500,13 +1398,15 @@ def prepare_nis(common_data, config):
 
     # Build classifier manager (same pattern as prepare_np3_aas)
     verifier_names_str = edge_weights.get('verifier_names',
-                                          edge_weights.get('augmentation_names', 'miewid human'))
+                                          edge_weights['augmentation_names'])
     verifier_names = verifier_names_str.split() if isinstance(verifier_names_str, str) else verifier_names_str
 
     classifier_thresholds = edge_weights.get('classifier_thresholds', {})
     classifier_units = {}
 
-    robust_plot_path = config.get("logging", {}).get("auto_threshold_plot_path", "dist.png")
+    # None means no plot. Defaulting to a filename wrote one into whatever
+    # directory the run started from.
+    robust_plot_path = config.get("logging", {}).get("auto_threshold_plot_path")
 
     # Process direct thresholds
     for name in classifier_thresholds:
@@ -1577,7 +1477,7 @@ def prepare_nis(common_data, config):
         classifier_units=classifier_units
     )
 
-    logger.info(f"NIS algorithm config:")
+    logger.info("NIS algorithm config:")
     logger.info(f"  n_sampled_vertices: {nis_config['n_sampled_vertices']}")
     logger.info(f"  m_neighbors_per_vertex: {nis_config['m_neighbors_per_vertex']}")
     logger.info(f"  temperature: {nis_config['temperature']}")
@@ -1589,13 +1489,3 @@ def prepare_nis(common_data, config):
         classifier_manager=classifier_manager,
         cluster_validator=common_data['cluster_validator']
     )
-
-
-def call_verifier_alg(embeddings):
-    """Helper function to create verifier algorithm from embeddings."""
-    def verifier_alg(edge_nodes):
-        logger = logging.getLogger("beta_stability")
-        scores = [embeddings.get_score(n0, n1) for n0, n1 in edge_nodes]
-        logger.info(f'Scores  {scores} ')
-        return scores
-    return verifier_alg

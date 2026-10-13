@@ -1,5 +1,3 @@
-import functools
-import pandas as pd
 from beta_stability.embeddings.embeddings import Embeddings
 
 
@@ -8,20 +6,21 @@ class TrackingIdEmbeddings(Embeddings):
     Embeddings wrapper that filters based on tracking id.
     Returns 1.0 for the same tracking ids, original score for others (optionally multiplied by a constant).
     """
-    
-    def __init__(self, 
+
+    def __init__(self,
                  embeddings,
                  ids,
-                 data_df, 
-                 node2uuid, 
+                 data_df,
+                 node2uuid,
                  distance_power=1,
                  print_func=print,
-                 id_key='uuid', 
-                 tracking_key='tracking_id', 
+                 id_key='uuid',
+                 tracking_key='tracking_id',
                  multiplier=1.0):
         # Initialize parent class
         super().__init__(embeddings, ids, distance_power, print_func)
-        
+        self._filtered_distance_matrices = {}
+
         # Additional attributes for tracking ID filtering
         self.data_df = data_df
         self.node2uuid = node2uuid
@@ -30,13 +29,13 @@ class TrackingIdEmbeddings(Embeddings):
         self.multiplier = multiplier
 
         print_func(f"Created TrackingIdEmbeddings with {len(self.embeddings)} embeddings")
-    
+
     def get_base(self):
         """Return the base embeddings without filtering."""
         return Embeddings(self.embeddings, self.uuids, self.distance_power, self.print_func)
 
     @classmethod
-    def from_embeddings(cls, 
+    def from_embeddings(cls,
                         base_embeddings,
                         data_df,
                         node2uuid,
@@ -56,7 +55,7 @@ class TrackingIdEmbeddings(Embeddings):
             tracking_key=tracking_key,
             multiplier=multiplier
         )
-    
+
     def _is_plausible(self, n0, n1):
         """Check if edge is plausible based on tracking id."""
         uuid1 = self.node2uuid[n0]
@@ -70,10 +69,9 @@ class TrackingIdEmbeddings(Embeddings):
         """Return 1.0 if same tracking id, base score if different."""
         if self._is_plausible(n0, n1):
             return 1.0
-        else:
-            # Use parent's get_score method
-            return super().get_score(n0, n1) * self.multiplier
-    
+        # Use parent's get_score method
+        return super().get_score(n0, n1) * self.multiplier
+
     def _apply_metadata_filter_to_distmat(self, distmat, ids, start_idx):
         """Apply metadata filtering to distance matrix by setting implausible edges to infinity."""
         for i in range(distmat.shape[0]):
@@ -85,12 +83,12 @@ class TrackingIdEmbeddings(Embeddings):
                     else:
                         distmat[i, j] = 1 - self.multiplier + self.multiplier * distmat[i, j]
         return distmat
-    
-    @functools.cache
+
     def _calculate_distance_matrix(self, flags=None):
-        # Call parent's _calculate_distance_matrix to get chunks
+        if flags in self._filtered_distance_matrices:
+            return self._filtered_distance_matrices[flags]
         chunks, ids = super()._calculate_distance_matrix(flags=flags)
-        
+
         # Apply tracking ID filtering to all chunks
         filtered_chunks = []
         start = 0
@@ -98,6 +96,7 @@ class TrackingIdEmbeddings(Embeddings):
             filtered_chunk = self._apply_metadata_filter_to_distmat(chunk.copy(), ids, start)
             filtered_chunks.append(filtered_chunk)
             start += chunk.shape[0]
-        
-        return filtered_chunks, ids
+
+        self._filtered_distance_matrices[flags] = (filtered_chunks, ids)
+        return self._filtered_distance_matrices[flags]
 

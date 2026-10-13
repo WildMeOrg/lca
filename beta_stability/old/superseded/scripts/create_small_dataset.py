@@ -3,9 +3,9 @@ import json
 from beta_stability.run import run as run_lca
 from run_baseline import run as run_baseline
 from run_baseline_topk import run_baseline_topk 
-from beta_stability.util.tools import *
-from beta_stability.util.init_logger import init_logger
-from beta_stability.preprocess import preprocess_data, save_data
+from beta_stability.data.io import *
+from beta_stability.init_logger import init_logger
+from beta_stability.data.preprocess import preprocess_data, save_data
 
 species = 'Spermwhale'
 x = 'num human'

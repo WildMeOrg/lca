@@ -15,7 +15,8 @@ def _logsumexp(x):
 
 
 def _fit_gmm(X, K=2, max_iter=100, tol=1e-6, reg=1e-6,
-             entropy_alpha=1.0, n_init=1, verbose=False, print_func=print,
+             entropy_alpha=1.0, n_init=1,
+             verbose=False, print_func=print,  # noqa: ARG001  (sibling signature)
              rng=None):
     """Fit K-component GMM with entropy regularization.
 
@@ -129,7 +130,7 @@ def _plot_threshold(scores, pi, mu, sigma2, threshold, plot_path):
     Uses log scale on y-axis so the tiny positive component (often <1% of data)
     is visible alongside the dominant negative component.
     """
-    fig, (ax_lin, ax_log) = plt.subplots(2, 1, figsize=(12, 10))
+    _, (ax_lin, ax_log) = plt.subplots(2, 1, figsize=(12, 10))
 
     # Generate x values for plotting distributions
     x_min, x_max = scores.min(), scores.max()
@@ -177,7 +178,7 @@ def _plot_threshold(scores, pi, mu, sigma2, threshold, plot_path):
 
 def _plot_fallback_threshold(scores, threshold, plot_path, percentile):
     """Plot histogram with quantile-based fallback threshold (no GMM components)."""
-    fig, (ax_lin, ax_log) = plt.subplots(2, 1, figsize=(12, 10))
+    _, (ax_lin, ax_log) = plt.subplots(2, 1, figsize=(12, 10))
     for ax, yscale, suffix in [(ax_lin, 'linear', '(linear scale)'),
                                 (ax_log, 'log', '(log scale)')]:
         ax.hist(scores, bins=200, density=True, alpha=0.5, color='gray',
@@ -203,9 +204,7 @@ def _fit_is_degenerate(pi, mu, sigma2):
     for arr in (pi, mu, sigma2):
         if not np.all(np.isfinite(arr)):
             return True
-    if np.any(np.asarray(sigma2) <= 0):
-        return True
-    return False
+    return bool(np.any(np.asarray(sigma2) <= 0))
 
 
 def find_threshold(scores, entropy_alpha=0.85, n_init=1, verbose=False,
@@ -368,9 +367,9 @@ def find_threshold(scores, entropy_alpha=0.85, n_init=1, verbose=False,
     _pred_prec, _pred_rec = _compute_pr(threshold, pi, mu, sigma2)
     find_threshold._last_predicted_precision = _pred_prec
     find_threshold._last_predicted_recall = _pred_rec
-    # Stash the fitted 2-component model (idx 0 = negative/incorrect, 1 = positive/correct)
-    # so callers can form the likelihood ratio p(s|correct)/p(s|incorrect) and place a
-    # human verdict on the classifier's evidence scale (Chuck's calibration idea).
+    # Keep the fitted two-component model, index 0 incorrect and 1 correct, so
+    # that a caller can form the likelihood ratio p(s|correct)/p(s|incorrect)
+    # and put a human verdict on the classifier's own evidence scale.
     find_threshold._last_components = {'pi': list(map(float, pi)),
                                        'mu': list(map(float, mu)),
                                        'sigma2': list(map(float, sigma2))}

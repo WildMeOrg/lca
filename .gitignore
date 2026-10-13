@@ -45,8 +45,12 @@ beta_stability/configs/
 *.json
 *.zip
 *.gradio
-data/
-beta_stability/data/
+# A data directory at the repository root, not the beta_stability/data package.
+/data/
+# That package's directory holds working files too, so ignore its contents and
+# keep its source.
+beta_stability/data/*
+!beta_stability/data/*.py
 
 # Frontend (kept for legacy paths)
 ui/node_modules

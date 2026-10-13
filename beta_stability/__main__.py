@@ -1,28 +1,13 @@
 # -*- coding: utf-8 -*-
-import logging
+"""Command-line entry point for the package.
 
+    python -m beta_stability --config path/to/species.yaml
 
-logger = logging.getLogger("beta_stability")
-
-
-def main():  # nocover
-    # import utool
-
-    # logger.info('Looks like the imports worked')
-    # logger.info('utool = {!r}'.format(utool))
-    # logger.info('utool.__file__ = {!r}'.format(utool.__file__))
-    # logger.info('utool.__version__ = {!r}'.format(utool.__version__))
-
-    import networkx
-
-    logger.info('networkx = {!r}'.format(networkx))
-    logger.info('networkx.__file__ = {!r}'.format(networkx.__file__))
-    logger.info('networkx.__version__ = {!r}'.format(networkx.__version__))
+This is the same command as the ``beta_stability-cluster`` console script
+declared in ``pyproject.toml``; both run :func:`beta_stability.run.main`.
+"""
+from beta_stability.run import main
 
 
 if __name__ == '__main__':
-    """
-    CommandLine:
-       python -m lca.__main__
-    """
     main()

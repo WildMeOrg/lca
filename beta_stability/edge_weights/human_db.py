@@ -2,7 +2,6 @@ import logging
 import sqlite3
 import os
 from datetime import datetime
-from pathlib import Path
 
 logger = logging.getLogger("beta_stability")
 
@@ -65,7 +64,7 @@ class human_db(object):
     def get_image_path(self, uuid):
         file_name = self.data_df.loc[self.data_df[self.id_key] == uuid, self.path_key].squeeze()
         return str(file_name)
-    
+
     def get_bbox(self, uuid):
         import json
         import pandas as pd
@@ -79,17 +78,14 @@ class human_db(object):
             if isinstance(bbox, (list, tuple, np.ndarray)) and len(bbox) >= 4:
                 x, y, w, h = bbox[:4]
                 return json.dumps([int(x), int(y), int(x + w), int(y + h)])
-            else:
-                return None
-        else:
             return None
-    
+        return None
+
     def get_cluster(self, uuid):
         if 'tracking_id' in self.data_df.columns:
             cluster = self.data_df.loc[self.data_df[self.id_key] == uuid, 'tracking_id'].squeeze()
             return str(cluster) if cluster is not None and str(cluster) != 'nan' else ""
-        else:
-            return ""
+        return ""
 
     def convert_query(self, n0, n1, score):
         uuid1 = self.node2uuid[n0]

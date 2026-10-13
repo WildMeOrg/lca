@@ -24,8 +24,8 @@ from typing import Callable, Dict, List, Optional
 
 import networkx as nx
 
-import beta_stability.util.cluster_tools as ct
-from beta_stability.util.tools import SetEncoder
+import beta_stability.metrics.cluster_metrics as ct
+from beta_stability.data.io import SetEncoder
 
 logger = logging.getLogger("beta_stability")
 

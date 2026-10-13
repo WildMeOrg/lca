@@ -30,10 +30,7 @@ class KMeansEmbeddings:
         # Estimate K from provided threshold (from base embeddings classifier config)
         all_scores = np.array(base_embeddings.get_all_scores())
         pi_positive = np.mean(all_scores > threshold)
-        if pi_positive > 0:
-            k_hat = max(1, round(1.0 / pi_positive))
-        else:
-            k_hat = n
+        k_hat = max(1, round(1.0 / pi_positive)) if pi_positive > 0 else n
         k_hat = min(k_hat, n - 1)
         if max_k is not None:
             k_hat = min(k_hat, max_k)
@@ -95,7 +92,7 @@ class KMeansEmbeddings:
         all_inds_y, all_inds_x = np.triu_indices(n, k=1)
         return self.similarity_matrix[all_inds_y, all_inds_x].tolist()
 
-    def get_edges(self, topk=5, **kwargs):
+    def get_edges(self, topk=5, **kwargs):  # noqa: ARG002
         """Top-k edges per node based on k-means similarity scores."""
         self.print_func("Calculating k-means-based edges...")
         n = len(self.ids)

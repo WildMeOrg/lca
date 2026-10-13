@@ -15,15 +15,14 @@ Two components:
 import networkx as nx
 import numpy as np
 import logging
-from typing import Dict, List, Tuple, Set, Optional
+from typing import Dict, List, Tuple
 from collections import defaultdict
 
 from sklearn.cluster import DBSCAN
 from sklearn.metrics import pairwise_distances
-from scipy.optimize import linear_sum_assignment
 
-from beta_stability.util.cluster_tools import build_node_to_cluster_mapping
-from beta_stability.util.tools import resolve_checkpoints, CHECKPOINT_LABEL
+from beta_stability.metrics.cluster_metrics import build_node_to_cluster_mapping
+from beta_stability.data.io import resolve_checkpoints, CHECKPOINT_LABEL
 
 logger = logging.getLogger("beta_stability")
 
@@ -144,20 +143,16 @@ def compute_regions_of_uncertainty(clustering_a, clustering_b):
     Returns:
         list of sets: each set contains node IDs in one region of uncertainty
     """
-    node2cid_a = build_node_to_cluster_mapping(clustering_a)
     node2cid_b = build_node_to_cluster_mapping(clustering_b)
 
     # Build overlap graph: which A-clusters overlap which B-clusters
     # For each (cA, cB) pair with partial overlap, all their nodes are uncertain
     uncertain_nodes = set()
-    overlap_edges = []  # edges between nodes that share uncertain clusters
 
     # Map B-cluster to its nodes for quick lookup
-    b_nodes = {}
-    for cid_b, nodes_b in clustering_b.items():
-        b_nodes[cid_b] = nodes_b
+    b_nodes = dict(clustering_b)
 
-    for cid_a, nodes_a in clustering_a.items():
+    for nodes_a in clustering_a.values():
         # Find all B-clusters that overlap with this A-cluster
         b_overlaps = defaultdict(set)
         for node in nodes_a:
@@ -187,7 +182,7 @@ def compute_regions_of_uncertainty(clustering_a, clustering_b):
     uncertain_graph.add_nodes_from(uncertain_nodes)
 
     for clustering in [clustering_a, clustering_b]:
-        for cid, nodes in clustering.items():
+        for nodes in clustering.values():
             uncertain_in_cluster = nodes & uncertain_nodes
             if len(uncertain_in_cluster) > 1:
                 nodes_list = list(uncertain_in_cluster)
@@ -196,10 +191,9 @@ def compute_regions_of_uncertainty(clustering_a, clustering_b):
                 for i in range(1, len(nodes_list)):
                     uncertain_graph.add_edge(hub, nodes_list[i])
 
-    regions = [comp for comp in nx.connected_components(uncertain_graph)
+    return [comp for comp in nx.connected_components(uncertain_graph)
                if len(comp) > 1]
 
-    return regions
 
 
 # ---------------------------------------------------------------------------
@@ -421,7 +415,7 @@ def apply_must_link_constraints(clustering, node2cid, must_links):
     return new_clustering, new_node2cid
 
 
-def find_impure_clusters(clustering, node2cid, cannot_links):
+def find_impure_clusters(clustering, node2cid, cannot_links):  # noqa: ARG001
     """
     Identify clusters containing cannot-link violations.
 
@@ -435,9 +429,8 @@ def find_impure_clusters(clustering, node2cid, cannot_links):
     """
     impure = defaultdict(list)
     for ni, nj in cannot_links:
-        if ni in node2cid and nj in node2cid:
-            if node2cid[ni] == node2cid[nj]:
-                impure[node2cid[ni]].append((ni, nj))
+        if ni in node2cid and nj in node2cid and node2cid[ni] == node2cid[nj]:
+            impure[node2cid[ni]].append((ni, nj))
     return dict(impure)
 
 
@@ -507,7 +500,7 @@ def resolve_impure_cluster(cluster_nodes, must_links, cannot_links, embeddings):
             constrained_groups.add(gi)
         if gj is not None:
             constrained_groups.add(gj)
-    for ni, nj in must_links:
+    for ni, _nj in must_links:
         gi = group_id_map.get(ni)
         if gi is not None:
             constrained_groups.add(gi)
@@ -604,11 +597,11 @@ class NP3AASAlgorithm:
 
         # Budget
         self.num_human_reviews = 0
-        self.max_human_reviews = config.get('max_human_reviews', 5000)
-        self.edges_per_review_batch = config.get('edges_per_review_batch', 200)
+        self.max_human_reviews = config['max_human_reviews']
+        self.edges_per_review_batch = config['edges_per_review_batch']
 
         # DBSCAN parameters
-        dbscan_eps_raw = config.get('dbscan_eps', 0.5)
+        dbscan_eps_raw = config['dbscan_eps']
         if dbscan_eps_raw == 'auto':
             classifier_threshold = config.get('classifier_threshold')
             if classifier_threshold is None:
@@ -622,16 +615,16 @@ class NP3AASAlgorithm:
                         f"-> eps={self.dbscan_eps:.4f}")
         else:
             self.dbscan_eps = float(dbscan_eps_raw)
-        self.dbscan_min_samples = config.get('dbscan_min_samples', 2)
-        self.dbscan_metric = config.get('dbscan_metric', 'cosine')
+        self.dbscan_min_samples = config['dbscan_min_samples']
+        self.dbscan_metric = config['dbscan_metric']
 
         # AAS parameters
-        self.s_min = config.get('s_min', 0.3)
-        self.k_max = config.get('k_max', 5)
-        self.epsilon = config.get('epsilon', 0.6)
+        self.s_min = config['s_min']
+        self.k_max = config['k_max']
+        self.epsilon = config['epsilon']
 
         # Validation
-        self.validation_step = config.get('validation_step', 100)
+        self.validation_step = config['validation_step']
         self.validation_initialized = False
         # Exact evaluation checkpoints (util/tools.py); resolved once the node count is known.
         self._checkpoints = set()
@@ -658,17 +651,14 @@ class NP3AASAlgorithm:
         """
         if self.phase == "INIT":
             return self._init_step(new_edges)
-        elif self.phase == "ACTIVE_REVIEW":
+        if self.phase == "ACTIVE_REVIEW":
             return self._active_review_step(new_edges)
-        else:
-            return []
+        return []
 
     def is_finished(self) -> bool:
         if self.phase == "FINISHED":
             return True
-        if self.num_human_reviews >= self.max_human_reviews:
-            return True
-        return False
+        return self.num_human_reviews >= self.max_human_reviews
 
     def get_clustering(self) -> Tuple[Dict, Dict, nx.Graph]:
         """Return (clustering_dict, node2cid, G)."""
@@ -678,7 +668,7 @@ class NP3AASAlgorithm:
 
         # Add edges within clusters (nearest neighbors to keep it sparse)
         if self.embeddings is not None:
-            for cid, nodes in self.clustering.items():
+            for nodes in self.clustering.values():
                 nodes_list = list(nodes)
                 if len(nodes_list) <= 10:
                     # Small cluster: add all pairs
@@ -727,7 +717,7 @@ class NP3AASAlgorithm:
     # Phase: INIT
     # ------------------------------------------------------------------
 
-    def _init_step(self, new_edges):
+    def _init_step(self, new_edges):  # noqa: ARG002  (the algorithm interface)
         """Initialize: run DBSCAN + FINCH, build AAS pool, return first batch."""
         # Extract embeddings from classifier_manager
         first_classifier = self.classifier_manager.algo_classifiers[0]
@@ -932,10 +922,7 @@ class NP3AASAlgorithm:
         # Weighted sampling
         weights = np.array([w for (_, _, w) in self.sampling_pool])
         total = weights.sum()
-        if total > 0:
-            probs = weights / total
-        else:
-            probs = np.ones(len(weights)) / len(weights)
+        probs = weights / total if total > 0 else np.ones(len(weights)) / len(weights)
 
         # Handle case where batch_size > pool size
         batch_size = min(batch_size, len(self.sampling_pool))
@@ -1023,10 +1010,10 @@ class NP3AASAlgorithm:
             self.validation_initialized = True
             return
 
-        if hasattr(self.cluster_validator, 'prev_num_human'):
-            if (self.num_human_reviews - self.cluster_validator.prev_num_human
-                    >= self.validation_step):
-                clustering, node2cid, G = self.get_clustering()
-                self.cluster_validator.trace_iter_compare_to_gt(
-                    clustering, node2cid, self.num_human_reviews, G
-                )
+        if (hasattr(self.cluster_validator, 'prev_num_human')
+                and self.num_human_reviews - self.cluster_validator.prev_num_human
+                >= self.validation_step):
+            clustering, node2cid, G = self.get_clustering()
+            self.cluster_validator.trace_iter_compare_to_gt(
+                clustering, node2cid, self.num_human_reviews, G
+            )

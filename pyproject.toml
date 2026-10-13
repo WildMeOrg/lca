@@ -6,12 +6,9 @@ build-backend = "hatchling.build"
 name = "beta_stability"
 version = "0.1.0"
 description = "Beta Stability — stability-driven clustering with active review for wildlife re-identification."
-readme = "README.rst"
+readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
-authors = [
-    { name = "Kate Nepovinnykh", email = "codeblackwell@gmail.com" },
-]
 dependencies = [
     "typing-extensions",
     "h5py",
@@ -19,6 +16,7 @@ dependencies = [
     "matplotlib",
     "networkx",
     "numpy",
+    "omegaconf",
     "opencv-python-headless",
     "pandas",
     "pillow",
@@ -31,6 +29,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "ruff",
     "pytest-cov",
     "pytest-subprocess",
     "coverage",
@@ -44,7 +43,7 @@ docs = [
 ]
 
 [project.scripts]
-beta_stability-cluster = "beta_stability.run_clustering_with_save:main"
+beta_stability-cluster = "beta_stability.run:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["beta_stability"]
@@ -59,3 +58,23 @@ include = [
 
 [tool.uv]
 package = true
+
+[tool.ruff]
+# Archived and experiment code is not held to the package's standard.
+extend-exclude = ["beta_stability/old", "beta_stability/exploratory", "internal"]
+
+[tool.ruff.lint.per-file-ignores]
+# These hold families of functions that share one signature so a registry or an
+# interface can call them uniformly, which means each one leaves some of its
+# parameters unused.
+"beta_stability/metrics/cluster_validator.py" = ["ARG001"]
+"beta_stability/metrics/cluster_metrics.py" = ["ARG001"]
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "B", "C4", "SIM", "RET", "ARG", "PIE", "PERF", "RUF"]
+ignore = [
+    "E501",             # line length: brunette owns wrapping
+    "RUF001",           # mathematical symbols in strings, docstrings and
+    "RUF002",           # comments are deliberate: beta, sigma, union
+    "RUF003",
+]

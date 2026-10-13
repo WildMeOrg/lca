@@ -33,15 +33,17 @@ import numpy.core as _nc
 # Compat shim: pickles saved with numpy 2.x reference numpy._core
 sys.modules.setdefault('numpy._core', _nc)
 sys.modules.setdefault('numpy._core.multiarray', _nc.multiarray)
-import pandas as pd
-from collections import defaultdict
-from scipy.optimize import linear_sum_assignment
-from sklearn.cluster import KMeans
-from sklearn.metrics import adjusted_rand_score
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.preprocessing import LabelEncoder, normalize
+# These import after the shim above on purpose: they load pickles written by
+# numpy 2.x, which the shim has to redirect first.
+import pandas as pd  # noqa: E402
+from collections import defaultdict  # noqa: E402
+from scipy.optimize import linear_sum_assignment  # noqa: E402
+from sklearn.cluster import KMeans  # noqa: E402
+from sklearn.metrics import adjusted_rand_score  # noqa: E402
+from sklearn.metrics.pairwise import cosine_similarity  # noqa: E402
+from sklearn.preprocessing import LabelEncoder, normalize  # noqa: E402
 
-from beta_stability.util.tools import resolve_checkpoints
+from beta_stability.data.io import resolve_checkpoints  # noqa: E402
 
 
 # ---------------------------------------------------------------
@@ -72,7 +74,7 @@ def write_metrics_row(metrics_file, row):
 # with GT query counting added around lookups
 # ---------------------------------------------------------------
 
-def _safe_normalize(weights, name='distribution'):
+def _safe_normalize(weights, name='distribution'):  # noqa: ARG001
     """Normalize a weight vector to a valid probability distribution.
 
     Replaces non-finite/negative entries and falls back to uniform if the
@@ -128,7 +130,7 @@ def nested_is(gt_s_ij, s_ij, N_v, N_n, n_hat=None, ci=False):
     inv_n_hat = 1.0 / np.maximum(n_hat, eps)
     Q, Q_uniform = _safe_normalize(inv_n_hat, 'Q')
     if Q_uniform:
-        log(f"  ⚠ Proposal Q collapsed; falling back to uniform proposal")
+        log("  ⚠ Proposal Q collapsed; falling back to uniform proposal")
 
     sampled_vertices = list(np.random.choice(
         list(range(OBSERVATIONS)), N_v, p=Q, replace=True))
@@ -142,8 +144,7 @@ def nested_is(gt_s_ij, s_ij, N_v, N_n, n_hat=None, ci=False):
             n_neighbor_uniform += 1
         q_all.append(q)
         sampled_neighbors.append(
-            [v_i] + list(np.random.choice(
-                list(range(len(s_ij[v_i]))), N_n - 1, p=q, replace=True)))
+            [v_i, *list(np.random.choice(list(range(len(s_ij[v_i]))), N_n - 1, p=q, replace=True))])
     if n_neighbor_uniform > 0:
         log(f"  ⚠ Neighbor distribution collapsed for {n_neighbor_uniform} sampled vertex/vertices; "
             f"used uniform fallback")
@@ -159,7 +160,7 @@ def nested_is(gt_s_ij, s_ij, N_v, N_n, n_hat=None, ci=False):
     n_terms = 0
     for i, v_i in enumerate(sampled_vertices):
         sum_n_bar = 0.0
-        for j, v_j in enumerate(sampled_neighbors[i]):
+        for _j, v_j in enumerate(sampled_neighbors[i]):
             gt_val = gt_s_ij[v_i][v_j]
             gt_lookups += 1
             if v_i == v_j:
@@ -195,25 +196,24 @@ def nested_is(gt_s_ij, s_ij, N_v, N_n, n_hat=None, ci=False):
 
     if not ci:
         return f_hat, n_hat, stats
-    else:
-        # CI recomputes same values — no new GT information used
-        w_ci = 0.0
-        n_ci_terms = 0
-        for i, v_i in enumerate(sampled_vertices):
-            sum_n_bar = 0.0
-            for v_j in sampled_neighbors[i]:
-                q_v_j = q_all[i][v_j]
-                if q_v_j > 0:
-                    sum_n_bar += gt_s_ij[v_i][v_j] / q_v_j
-            n_bar = sum_n_bar / max(1, len(sampled_neighbors[i]))
-            if n_bar > 0 and Q[v_i] > 0 and np.isfinite(n_bar) and np.isfinite(Q[v_i]):
-                w_ci += ((1.0 / n_bar) * (1.0 / Q[v_i]) - f_hat) ** 2
-                n_ci_terms += 1
-        var_hat = w_ci / max(1, n_ci_terms)
-        ci_val = 1.96 * (np.sqrt(var_hat / max(1, N_v)))
-        if not np.isfinite(ci_val):
-            ci_val = 0.0
-        return f_hat, ci_val, n_hat, stats
+    # CI recomputes same values — no new GT information used
+    w_ci = 0.0
+    n_ci_terms = 0
+    for i, v_i in enumerate(sampled_vertices):
+        sum_n_bar = 0.0
+        for v_j in sampled_neighbors[i]:
+            q_v_j = q_all[i][v_j]
+            if q_v_j > 0:
+                sum_n_bar += gt_s_ij[v_i][v_j] / q_v_j
+        n_bar = sum_n_bar / max(1, len(sampled_neighbors[i]))
+        if n_bar > 0 and Q[v_i] > 0 and np.isfinite(n_bar) and np.isfinite(Q[v_i]):
+            w_ci += ((1.0 / n_bar) * (1.0 / Q[v_i]) - f_hat) ** 2
+            n_ci_terms += 1
+    var_hat = w_ci / max(1, n_ci_terms)
+    ci_val = 1.96 * (np.sqrt(var_hat / max(1, N_v)))
+    if not np.isfinite(ci_val):
+        ci_val = 0.0
+    return f_hat, ci_val, n_hat, stats
 
 
 # ---------------------------------------------------------------
@@ -300,10 +300,10 @@ def load_and_filter(dataset_name):
     # Filter 2: viewpoint
     if cfg['viewpoint_list']:
         for vp_val in [cfg['viewpoint_list']]:
-            def matches(value):
+            def matches(value, allowed=vp_val):
                 if pd.isna(value):
                     return False
-                return str(value) in [str(v) for v in vp_val]
+                return str(value) in [str(v) for v in allowed]
             df = df[df['viewpoint'].apply(matches)]
     log(f"  After viewpoint filter: {len(df)} annotations")
 
@@ -355,7 +355,7 @@ def hungarian_metrics(pred_labels, gt_labels):
     # Build cluster sets
     gt_clusters = defaultdict(set)
     pred_clusters = defaultdict(set)
-    for i, (g, p) in enumerate(zip(gt_labels, pred_labels)):
+    for i, (g, p) in enumerate(zip(gt_labels, pred_labels, strict=True)):
         gt_clusters[g].add(i)
         pred_clusters[p].add(i)
 
@@ -381,7 +381,7 @@ def hungarian_metrics(pred_labels, gt_labels):
     row_ind, col_ind = linear_sum_assignment(-jaccard)
 
     # Count valid matches (Jaccard > 0)
-    tp = sum(1 for r, c in zip(row_ind, col_ind) if jaccard[r, c] > 0)
+    tp = sum(1 for r, c in zip(row_ind, col_ind, strict=True) if jaccard[r, c] > 0)
     fp = n_pred - tp
     fn = n_gt - tp
 
@@ -412,7 +412,7 @@ def hungarian_metrics(pred_labels, gt_labels):
 _KMEANS_EVAL_CACHE = {}
 
 
-def evaluate_kmeans(embeddings, gt_labels, k, true_K, n_init=10):
+def evaluate_kmeans(embeddings, gt_labels, k, true_K, n_init=10):  # noqa: ARG001
     """Run k-means and compute pairwise + Hungarian + CEAF metrics.
 
     The result depends ONLY on the integer k (embeddings, gt_labels and the
@@ -450,7 +450,6 @@ def evaluate_kmeans(embeddings, gt_labels, k, true_K, n_init=10):
             counts[pred_labels[node]] += 1
         tp += sum(c * (c - 1) // 2 for c in counts.values())
 
-    total_pairs = n * (n - 1) // 2
     fp = tp_pred - tp
     fn = tp_gt - tp
 
@@ -497,10 +496,10 @@ def find_optimal_ratio(gt_s_synth, s_ij, n_hat, n_nodes, budget, K_synth,
     max_nv = min(budget // 2, n_nodes)
     if max_nv < 2:
         return 7.0  # fallback
-    nv_candidates = sorted(set(
+    nv_candidates = sorted({
         max(2, int(x))
         for x in np.logspace(np.log10(2), np.log10(max_nv), 20)
-    ))
+    })
 
     plan = []
     for nv in nv_candidates:
@@ -511,7 +510,8 @@ def find_optimal_ratio(gt_s_synth, s_ij, n_hat, n_nodes, budget, K_synth,
 
     if workers > 1:
         def _trial(task):
-            import contextlib, io
+            import contextlib
+            import io
             global _log_file
             nv_, nn_, t_ = task
             _log_file = None
@@ -522,7 +522,7 @@ def find_optimal_ratio(gt_s_synth, s_ij, n_hat, n_nodes, budget, K_synth,
             return f_hat_, buf.getvalue()
         tasks = [(nv, nn, t) for nv, nn in plan for t in range(n_trials)]
         outs = _fork_map(_trial, tasks, workers, threads=1)
-        per_task = dict(zip(tasks, outs))
+        per_task = dict(zip(tasks, outs, strict=True))
 
     best_mse = float('inf')
     best_ratio = 7.0
@@ -617,7 +617,8 @@ def _fork_map(fn, tasks, workers, threads=1, parent_task=None):
             except _queue.Empty:
                 dead = [pr.exitcode for pr in procs if pr.exitcode not in (None, 0)]
                 if dead:
-                    raise RuntimeError(f'worker process died (exit codes {dead})')
+                    raise RuntimeError(
+                        f'worker process died (exit codes {dead})') from None
                 continue
             if not ok:
                 raise RuntimeError(f'worker failed on task {tasks[i]!r}: {res}')
@@ -646,7 +647,7 @@ def prefill_kmeans_cache(embeddings, gt_labels, true_K, ks, n_init, workers, par
         return 0
     res = _fork_map(lambda k: evaluate_kmeans(embeddings, gt_labels, k, true_K, n_init=n_init),
                     todo, workers, threads=1, parent_task=parent_task)
-    for k, r in zip(todo, res):
+    for k, r in zip(todo, res, strict=True):
         _KMEANS_EVAL_CACHE[(k, n_init)] = r
     return len(todo)
 
@@ -735,7 +736,7 @@ def main():
             os.makedirs(metrics_dir, exist_ok=True)
         open(args.metrics_file, 'w').close()
 
-    _log_file = open(args.log_file, 'w')
+    _log_file = open(args.log_file, 'w')  # noqa: SIM115  (open for the whole run)
 
     log(f"=== Reference NIS on {args.dataset} ===")
     log(f"N_v={args.N_v}, N_n={args.N_n}, runs={args.runs}, seed={args.seed}")
@@ -757,11 +758,11 @@ def main():
 
     # Explain GT query budget
     log("--- GT query budget ---")
-    log(f"Per run:")
+    log("Per run:")
     log(f"  Total GT lookups:     N_v * N_n = {N_v} * {N_n} = {N_v * N_n}")
     log(f"  Self lookups (j=0):   N_v * 1   = {N_v}  (always gt=1, answer is known)")
     log(f"  Non-self lookups:     N_v * (N_n-1) = {N_v} * {N_n - 1} = {N_v * (N_n - 1)}")
-    log(f"  (non-self may include duplicates from with-replacement sampling)")
+    log("  (non-self may include duplicates from with-replacement sampling)")
     log()
 
     # Build similarity matrix
@@ -866,7 +867,8 @@ def main():
             # Pass 1: every K_hat the loop below will produce. Each run reseeds the
             # global RNG immediately before nested_is, so these are the same values;
             # output is suppressed so nis.log is not altered.
-            import contextlib, io
+            import contextlib
+            import io
             _ks = set()
             _saved_log_file = _log_file
             _log_file = None
@@ -1078,12 +1080,12 @@ def main():
         f"(range: [{k_hats.min():.1f}, {k_hats.max():.1f}])")
     log(f"  CI (mean):  +/- {cis.mean():.1f}")
     log(f"  K_hat/K:    {k_hats.mean() / true_K:.3f}")
-    log(f"  Pairwise metrics:")
+    log("  Pairwise metrics:")
     log(f"    F1:         {f1s.mean():.3f} +/- {f1s.std():.3f}")
     log(f"    ARI:        {aris.mean():.3f} +/- {aris.std():.3f}")
     log(f"    Precision:  {precs.mean():.3f} +/- {precs.std():.3f}")
     log(f"    Recall:     {recs.mean():.3f} +/- {recs.std():.3f}")
-    log(f"  Hungarian metrics:")
+    log("  Hungarian metrics:")
     log(f"    H_F1:       {h_f1s.mean():.3f} +/- {h_f1s.std():.3f}")
     log(f"    H_Prec:     {h_precs.mean():.3f} +/- {h_precs.std():.3f}")
     log(f"    H_Recall:   {h_recs.mean():.3f} +/- {h_recs.std():.3f}")
@@ -1104,7 +1106,7 @@ def main():
     log(f"  Unique vertices:       {avg_stats['unique_vertices']:.0f}  "
         f"(out of {N_v} sampled, with replacement)")
     log()
-    log(f"  In the reference code, each gt_s_ij[v_i][v_j] lookup = 1 oracle query.")
+    log("  In the reference code, each gt_s_ij[v_i][v_j] lookup = 1 oracle query.")
     log(f"  The algorithm queries GT exactly N_v * N_n = {N_v * N_n} times per run.")
     log(f"  Of these, N_v = {N_v} are self-comparisons (j=0, answer known a priori).")
     log(f"  The remaining {N_v * (N_n - 1)} are the 'human review' equivalent.")
