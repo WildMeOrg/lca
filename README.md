@@ -40,7 +40,9 @@ uv run pytest tests/
 ```
 
 The suite runs the whole pipeline on a small generated dataset, for every
-algorithm type, and takes about half a minute.
+algorithm type, and takes about half a minute. The tests for
+`scripts/reproduce_gzcd.py` skip unless the `embeddings` extra is installed,
+since that script imports the model stack.
 
 ## Quick start
 

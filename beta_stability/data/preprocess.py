@@ -1,4 +1,4 @@
-### TODO """preprocessing scripts - filtering, subsampling, splitting"""
+"""Preprocessing: filtering, subsampling and splitting annotations."""
 import json
 import logging
 import os

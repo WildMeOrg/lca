@@ -18,7 +18,10 @@ import sys
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'scripts'))
-import reproduce_gzcd
+
+# The script imports the embedding stack at module level, so these tests need
+# the `embeddings` extra. Without it they skip instead of failing collection.
+reproduce_gzcd = pytest.importorskip('reproduce_gzcd')
 
 #: What a run clusters, and what gets embedded.
 ANNOTATIONS, INDIVIDUALS, TO_EMBED = 3764, 435, 4501
