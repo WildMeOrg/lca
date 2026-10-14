@@ -1,0 +1,62 @@
+# The configuration of the reported GZCD run. Every parameter the algorithm
+# reads is here, so this file and the two annotation files are the whole input.
+#
+# reproduce_gzcd.py fills in the five paths marked below, writes the resolved
+# copy beside the results, and runs that, so the file next to the results is
+# exactly what ran and can be re-run by hand with
+#
+#     uv run python -m beta_stability --config <that file>
+#
+exp_name: GZCD
+species: Grevys zebra
+seed: 42
+algorithm_type: stability
+
+metrics:
+  report_ceaf: true
+  ceaf_sim: dice
+
+algorithm:
+  initial_topk: auto
+  auto_topk_coverage: 0.9
+  max_outer_iterations: 10000
+
+stability:
+  target_alpha: 0.5
+  max_human_reviews: 5000
+  edges_per_review_batch: 200
+  validation_step: 100
+  review_confidence: auto
+  phase0_alpha: 0.0
+  max_phase0_iterations: auto
+  unified_candidate_ranking: true
+  review_weakest_positive: true
+  review_positive_inactive: true
+  kmeans_fallback_cluster_size: 1
+  verifier_name: [miewid]
+
+edge_weights:
+  verifier_names: miewid simulated_human
+  classifier_thresholds:
+    miewid: auto(0.2)
+  prob_human_correct: 1.0
+
+data:
+  id_key: uuid
+  name_keys: [individual_id]
+  viewpoint_list: [right, backright, downright, frontright]
+  separate_viewpoints: false
+  n_filter_min: 1
+  n_filter_max: 100
+  # filled in by the script
+  annotation_file: null
+  embedding_file: null
+  output_path: null
+
+logging:
+  log_level: INFO
+  update_log_file: true
+  file_mode: w
+  # filled in by the script
+  log_file: null
+  auto_threshold_plot_path: null

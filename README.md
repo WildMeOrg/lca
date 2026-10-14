@@ -23,14 +23,19 @@ threshold implies.
 uv sync
 ```
 
-That creates the virtual environment from `pyproject.toml` and `uv.lock`. Add
-`--extra dev` for `pytest` and `ruff`. Every command below runs through
-`uv run`, which uses that environment without activating it.
-
-To check the installation:
+That creates the virtual environment from `pyproject.toml` and `uv.lock`.
+There are two optional extras: `dev` for `pytest` and `ruff`, and `embeddings`
+for the model needed by `scripts/reproduce_gzcd.py`. Naming one extra drops the
+other, so ask for both when you want both:
 
 ```
-uv sync --extra dev
+uv sync --extra dev --extra embeddings
+```
+
+Every command below runs through `uv run`, which uses that environment without
+activating it. To check the installation:
+
+```
 uv run pytest tests/
 ```
 
@@ -183,6 +188,39 @@ for annotation in annotations[:5]:
     print(annotation["uuid"], "->", annotation["cluster_id"])
 ```
 
+## Reproducing a published run
+
+[scripts/reproduce_gzcd.py](scripts/reproduce_gzcd.py) reproduces the Grevy's
+zebra result, going from nothing to a clustering in four steps, each skipped if
+its output is already there:
+
+1. download the metadata and the needed images from
+   [imageomics/GZCD](https://huggingface.co/datasets/imageomics/GZCD)
+2. write the annotation files
+3. embed the annotations with MiewID v3,
+   [conservationxlabs/miewid-msv3](https://huggingface.co/conservationxlabs/miewid-msv3),
+   at the model's default settings
+4. fill the data paths into [scripts/gzcd.yaml](scripts/gzcd.yaml), which holds
+   every other parameter of the run, and run it
+
+```
+uv sync --extra dev --extra embeddings
+uv run python scripts/reproduce_gzcd.py --max-individuals 20   # a subset, to start
+uv run python scripts/reproduce_gzcd.py                        # all 3,764
+```
+
+Downloading and embedding is the slow part, so `--max-individuals N` takes the N
+most-sighted animals for an end-to-end check first, and `--stop-after` ends after
+any step. The embedding step needs a GPU. The full run clusters 3,764
+annotations of 435 individuals and ends on 435 clusters after 580 reviews, at a
+CEAF F1 of 0.9880. Those are the numbers to compare a fresh run against.
+
+The selection keeps the census annotations of Grevy's zebra that carry an
+identity and a right-side viewpoint, and drops the 43 listed in
+[scripts/gzcd_excluded_annotations.csv](scripts/gzcd_excluded_annotations.csv),
+which were rejected as too low-quality to identify. What gets embedded is the
+census region, not the full animal detection. 
+
 ## Repository layout
 
 ```text
@@ -199,6 +237,11 @@ beta_stability/
 ├── edge_weights/             # verifiers: classifiers, thresholds, reviewer
 ├── embeddings/               # embedding backends
 └── metrics/                  # evaluation against ground truth, run tracking
+
+scripts/
+├── reproduce_gzcd.py             # the GZCD run, from the public dataset
+├── gzcd.yaml                     #   its configuration
+└── gzcd_excluded_annotations.csv #   the 43 annotations no public field marks
 
 tests/                        # uv run pytest tests/
 examples/
@@ -220,13 +263,14 @@ uv.lock                       # locked dependency resolution
   the positive-edge graph at the selected threshold.
 - `stability.verifier_name` names the embedding the edges come from, for
   example `miewid`. Setting it to `auto` instead enables a silhouette-based
-  selector that can switch the run to k-means edges; that path is optional and
-  none of the reported experiments use it.
+  selector that can switch the run to k-means edges. That path is optional and
+  far less tested than naming the embedding directly.
 - `edge_weights.classifier_thresholds` takes `auto(fraction)` to fit a
   two-component Gaussian mixture to the pair-score histogram and pick the
   threshold from it.
-- `edge_weights.prob_human_correct` is the simulated reviewer's accuracy, used
-  for the robustness experiments.
+- `edge_weights.prob_human_correct` is the simulated reviewer's accuracy. Set
+  it below `1.0` to see how the result holds up when the reviewer makes
+  mistakes.
 - `edge_weights.verifier_names` lists the verifiers in order, ending in the
   reviewer: `simulated_human` answers from the identity labels, so it needs
   `data.name_keys`; `no_human` runs fully automatically, which is what a run

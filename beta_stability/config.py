@@ -81,7 +81,8 @@ DEFAULTS = {
         'target_alpha': 0.5,
         # Phase 0 runs to a weaker target, on classifier evidence alone.
         'phase0_alpha': 0.0,
-        'max_phase0_iterations': 20,
+        # 'auto' derives the cap from the data; every current experiment uses it.
+        'max_phase0_iterations': 'auto',
         # Deactivate a positive edge only when the crossing negative beats the
         # weakest positive on its MSP by this margin; marginal negatives go to
         # review instead of being cut on classifier evidence alone.
@@ -101,7 +102,7 @@ DEFAULTS = {
         'review_positive_inactive': True,
         # Fill the batch from internal and external candidates ranked together
         # by stability, rather than giving internal ones priority.
-        'unified_candidate_ranking': False,
+        'unified_candidate_ranking': True,
         # Terminate early when min stability has not improved by
         # human_stall_epsilon for this many consecutive batches. 0 = disabled.
         'human_stall_patience': 0,

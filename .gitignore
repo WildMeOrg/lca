@@ -58,3 +58,4 @@ ui/node_modules
 .claude
 # Legacy LCA files kept on disk after the beta-stability merge, never tracked
 /_archive_lca/
+/beta_stability/share
