@@ -48,7 +48,7 @@ embeddings = [
     "torch",
     # The model's remote code targets the 4.x API: transformers 5 renamed
     # _tied_weights_keys, which MiewIdNet relies on.
-    "transformers>=4.40,<5",
+    "transformers>=4.40,<6",
     "albumentations",
     "timm",
 ]
