@@ -71,8 +71,8 @@ include = [
 package = true
 
 [tool.ruff]
-# Archived and experiment code is not held to the package's standard.
-extend-exclude = ["beta_stability/old", "beta_stability/exploratory", "internal"]
+# Experiment code is not held to the package's standard.
+extend-exclude = ["beta_stability/exploratory", "internal"]
 
 [tool.ruff.lint.per-file-ignores]
 # These hold families of functions that share one signature so a registry or an

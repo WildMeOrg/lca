@@ -59,3 +59,5 @@ ui/node_modules
 # Legacy LCA files kept on disk after the beta-stability merge, never tracked
 /_archive_lca/
 /beta_stability/share
+# Superseded code, kept out of the repository
+/beta_stability/old/
